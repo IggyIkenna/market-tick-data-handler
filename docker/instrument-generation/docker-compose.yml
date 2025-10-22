@@ -1,0 +1,63 @@
+version: '3.8'
+
+services:
+  instrument-generator:
+    build:
+      context: ../..
+      dockerfile: docker/instrument-generation/Dockerfile
+    container_name: market-tick-instrument-generator
+    environment:
+      # Tardis API Configuration
+      - TARDIS_API_KEY=${TARDIS_API_KEY:-TD.l6pTDHIcc9fwJZEz.Y7cp7lBSu-pkPEv.55-ZZYvZqtQL7hY.C2-pXYQ6yebRF7M.DwzJ7MFPry-C7Yp.xe1j}
+      - TARDIS_BASE_URL=${TARDIS_BASE_URL:-https://datasets.tardis.dev}
+      - TARDIS_TIMEOUT=${TARDIS_TIMEOUT:-30}
+      - TARDIS_MAX_RETRIES=${TARDIS_MAX_RETRIES:-3}
+      
+      # GCP Configuration
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID:-central-element-323112}
+      - GCP_CREDENTIALS_PATH=${GCP_CREDENTIALS_PATH:-/app/central-element-323112-e35fb0ddafe2.json}
+      - GCS_BUCKET=${GCS_BUCKET:-market-data-tick}
+      - GCS_REGION=${GCS_REGION:-asia-northeast1-c}
+      
+      # Service Configuration
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_DESTINATION=${LOG_DESTINATION:-local}
+      - MAX_CONCURRENT_REQUESTS=${MAX_CONCURRENT_REQUESTS:-2}
+      - BATCH_SIZE=${BATCH_SIZE:-1000}
+      - MEMORY_EFFICIENT=${MEMORY_EFFICIENT:-false}
+      - ENABLE_CACHING=${ENABLE_CACHING:-true}
+      - CACHE_TTL=${CACHE_TTL:-3600}
+      
+      # Sharding Configuration
+      - SHARD_INDEX=${SHARD_INDEX:-0}
+      - TOTAL_SHARDS=${TOTAL_SHARDS:-30}
+      - INSTRUMENTS_PER_SHARD=${INSTRUMENTS_PER_SHARD:-2}
+      
+      # Output Configuration
+      - OUTPUT_FORMAT=${OUTPUT_FORMAT:-json}
+      - DEFAULT_LIMIT=${DEFAULT_LIMIT:-10000}
+      - INCLUDE_METADATA=${INCLUDE_METADATA:-true}
+      - COMPRESSION=${COMPRESSION:-snappy}
+      
+      # Runtime Configuration
+      - DEBUG=${DEBUG:-false}
+      - TEST_MODE=${TEST_MODE:-false}
+      
+      # Instrument Generation Configuration
+      - INSTRUMENT_EXCHANGES=${INSTRUMENT_EXCHANGES:-binance,binance-futures,deribit,bybit,bybit-spot,okex,okex-futures,okex-swap}
+      - INSTRUMENT_START_DATE=${INSTRUMENT_START_DATE:-2023-05-23}
+      - INSTRUMENT_END_DATE=${INSTRUMENT_END_DATE:-2023-05-25}
+    volumes:
+      # Mount local data directory for persistence
+      - ../../data:/app/data
+      # Mount logs directory
+      - ../../logs:/app/logs
+      # Mount temp directory
+      - ../../temp:/app/temp
+    restart: "no"  # Don't restart automatically for one-time jobs
+    networks:
+      - market-tick-network
+
+networks:
+  market-tick-network:
+    driver: bridge

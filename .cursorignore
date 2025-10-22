@@ -1,0 +1,81 @@
+# Virtual environment (excluded - use requirements.txt for dependencies)
+venv/
+venv_local/
+
+# Python cache (recursive)
+**/__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pytest_cache
+.Python
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+backend/logs/
+
+# Data files (large datasets) - EXCLUDED FOR CURSOR AGENTS
+*.zip
+
+# Large result files and package-lock files
+pure_lending_backtest_results_*.json
+*package-lock.json
+tests/tmp/
+*.csv
+
+# Build artifacts - EXCLUDED FOR CURSOR AGENTS
+build/
+dist/
+frontend/dist/
+*.egg-info/
+
+# Node modules (including nested ones) - EXCLUDED FOR CURSOR AGENTS
+**/node_modules/
+node_modules/
+frontend/node_modules/
+
+# Configuration directories (runtime configs, not source code)
+# configs/
+
+# Scripts subdirectories (utility scripts, not core application code)
+# scripts/analyzers/
+# scripts/downloaders/
+# scripts/orchestrators/
+# scripts/processors/
+# scripts/utilities/
+
+# Environment files (sensitive will remove later)
+#.env
+
+# Explicitly include these environment files (override global ignore)
+!.env.dev
+!.env.dev.backup
+!.env.production
+!.env.staging
+!docker/.env.dev
+!docker/.env.local
+!docker/.env.prod
+!docker/.env.staging
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.json
+
+# Results and large output files - EXCLUDED FOR CURSOR AGENTS
+results/
+*.tar.gz
+
+ 
