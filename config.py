@@ -36,6 +36,8 @@ class TardisConfig:
             raise ValueError("Max retries must be non-negative")
         if self.max_concurrent <= 0:
             raise ValueError("Max concurrent must be positive")
+        if self.max_parallel_uploads <= 0:
+            raise ValueError("Max parallel uploads must be positive")
         if self.rate_limit_per_vm <= 0:
             raise ValueError("Rate limit per VM must be positive")
 
@@ -297,7 +299,8 @@ class ConfigManager:
             base_url=config_dict.get('tardis', {}).get('base_url', 'https://datasets.tardis.dev'),
             timeout=config_dict.get('tardis', {}).get('timeout', 30),
             max_retries=config_dict.get('tardis', {}).get('max_retries', 3),
-            max_concurrent=config_dict.get('tardis', {}).get('max_concurrent', 2),
+            max_concurrent=config_dict.get('tardis', {}).get('max_concurrent', 50),
+            max_parallel_uploads=config_dict.get('tardis', {}).get('max_parallel_uploads', 20),
             rate_limit_per_vm=config_dict.get('tardis', {}).get('rate_limit_per_vm', 1000000)
         )
         
