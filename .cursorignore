@@ -60,6 +60,7 @@ frontend/node_modules/
 #.env
 
 # Explicitly include these environment files (override global ignore)
+!.env
 !.env.dev
 !.env.dev.backup
 !.env.production

@@ -184,7 +184,7 @@ class TardisConnector:
             self._session = aiohttp.ClientSession(
                 timeout=timeout,
                 headers=headers,
-                connector=aiohttp.TCPConnector(limit=100, limit_per_host=30)
+                connector=aiohttp.TCPConnector(limit=200, limit_per_host=100)
             )
     
     async def _close_session(self):

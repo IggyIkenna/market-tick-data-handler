@@ -10,7 +10,7 @@ set -e
 PROJECT_ID="central-element-323112"
 ZONE="asia-northeast1-c"
 MACHINE_TYPE_INSTRUMENTS="e2-standard-4"
-MACHINE_TYPE_TARDIS="e2-highmem-8"
+MACHINE_TYPE_TARDIS="n2-highmem-16"
 IMAGE_FAMILY="ubuntu-2004-lts"
 IMAGE_PROJECT="ubuntu-os-cloud"
 
@@ -136,9 +136,11 @@ cat > .env << 'ENVEOF'
 # Tardis API Configuration
 TARDIS_API_KEY=TD.l6pTDHIcc9fwJZEz.Y7cp7lBSu-pkPEv.55-ZZYvZqtQL7hY.C2-pXYQ6yebRF7M.DwzJ7MFPry-C7Yp.xe1j
 TARDIS_BASE_URL=https://datasets.tardis.dev
-TARDIS_TIMEOUT=30
+TARDIS_TIMEOUT=60
 TARDIS_MAX_RETRIES=3
-MAX_CONCURRENT_REQUESTS=2
+TARDIS_MAX_CONCURRENT=50
+MAX_CONCURRENT_REQUESTS=50
+MAX_PARALLEL_UPLOADS=20
 RATE_LIMIT_PER_VM=1000000
 
 # GCP Configuration
@@ -321,9 +323,11 @@ cat > .env << 'ENVEOF'
 # Tardis API Configuration
 TARDIS_API_KEY=TD.l6pTDHIcc9fwJZEz.Y7cp7lBSu-pkPEv.55-ZZYvZqtQL7hY.C2-pXYQ6yebRF7M.DwzJ7MFPry-C7Yp.xe1j
 TARDIS_BASE_URL=https://datasets.tardis.dev
-TARDIS_TIMEOUT=30
+TARDIS_TIMEOUT=60
 TARDIS_MAX_RETRIES=3
-MAX_CONCURRENT_REQUESTS=2
+TARDIS_MAX_CONCURRENT=50
+MAX_CONCURRENT_REQUESTS=50
+MAX_PARALLEL_UPLOADS=20
 RATE_LIMIT_PER_VM=1000000
 
 # GCP Configuration
@@ -406,9 +410,9 @@ fi
 
 echo "Shard $SHARD_INDEX processing date: $SHARD_DATE"
 
-# Run data download for this shard's date
+# Run data download for this shard's date with sharding parameters
 echo "Starting data download for $SHARD_DATE..."
-cmd="python3 -m src.main --mode download --start-date $SHARD_DATE --end-date $SHARD_DATE"
+cmd="python3 -m src.main --mode download --start-date $SHARD_DATE --end-date $SHARD_DATE --shard-index $SHARD_INDEX --total-shards $TOTAL_SHARDS"
 if [ -n "$VENUES" ]; then
     cmd="$cmd --venues $VENUES"
 fi

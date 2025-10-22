@@ -233,7 +233,8 @@ class TickDataDownloadHandler(ModeHandler):
     
     async def run(self, start_date: datetime, end_date: datetime,
                   venues: List[str] = None, instrument_types: List[str] = None,
-                  data_types: List[str] = None, max_instruments: int = None, **kwargs):
+                  data_types: List[str] = None, max_instruments: int = None,
+                  shard_index: int = None, total_shards: int = None, **kwargs):
         """Download tick data and upload to GCS"""
         logger.info(f"📥 Starting tick data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         
@@ -260,7 +261,9 @@ class TickDataDownloadHandler(ModeHandler):
                     venues=venues,
                     instrument_types=instrument_types,
                     data_types=data_types,
-                    max_instruments=max_instruments
+                    max_instruments=max_instruments,
+                    shard_index=shard_index,
+                    total_shards=total_shards
                 )
                 
                 results['total_downloads'] += download_result.get('processed', 0)
@@ -462,7 +465,9 @@ class FullPipelineHandler(ModeHandler):
                     venues=venues,
                     instrument_types=instrument_types,
                     data_types=data_types,
-                    max_instruments=max_instruments
+                    max_instruments=max_instruments,
+                    shard_index=shard_index,
+                    total_shards=total_shards
                 )
                 
                 results['total_downloads'] += download_result.get('processed', 0)
@@ -578,6 +583,18 @@ Examples:
         help='Maximum number of worker threads for parallel processing (default: 4)'
     )
     
+    # Sharding options
+    parser.add_argument(
+        '--shard-index',
+        type=int,
+        help='Shard index for distributed processing (0-based)'
+    )
+    parser.add_argument(
+        '--total-shards',
+        type=int,
+        help='Total number of shards for distributed processing'
+    )
+    
     # Logging
     parser.add_argument(
         '--log-level',
@@ -661,7 +678,9 @@ async def main():
                 venues=args.venues,
                 instrument_types=args.instrument_types,
                 data_types=args.data_types,
-                max_instruments=args.max_instruments
+                max_instruments=args.max_instruments,
+                shard_index=args.shard_index,
+                total_shards=args.total_shards
             )
         elif args.mode == 'validate':
             handler = DataValidationHandler(config)
