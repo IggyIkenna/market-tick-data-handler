@@ -163,8 +163,8 @@ class DataValidator:
             DataFrame with missing data analysis by type
         """
         if data_types is None:
-            # Check for all available data types based on instrument definitions
-            data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'options_chain', 'liquidations']
+            # Dynamically determine data types from instrument definitions
+            data_types = self._get_all_available_data_types(start_date, end_date, venues, instrument_types)
         
         logger.info(f"Checking missing data by type from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         logger.info(f"Data types to check: {data_types}")
@@ -246,16 +246,37 @@ class DataValidator:
         
         return missing
     
+    def _get_all_available_data_types(self, start_date: datetime, end_date: datetime,
+                                    venues: list = None, instrument_types: list = None) -> list:
+        """Get all unique data types available across all instruments in the date range"""
+        all_data_types = set()
+        
+        current_date = start_date
+        while current_date <= end_date:
+            # Get instrument definitions for this date
+            instruments_df = self._get_expected_instruments(current_date, venues, instrument_types)
+            
+            if not instruments_df.empty:
+                # Extract all data types from the data_types column
+                for data_types_str in instruments_df['data_types'].dropna():
+                    if isinstance(data_types_str, str):
+                        # Split comma-separated data types and add to set
+                        types = [dt.strip() for dt in data_types_str.split(',')]
+                        all_data_types.update(types)
+            
+            current_date += timedelta(days=1)
+        
+        # Convert to sorted list for consistent ordering
+        return sorted(list(all_data_types))
+    
     def generate_missing_data_report(self, start_date: datetime, end_date: datetime,
                                    venues: list = None, instrument_types: list = None,
                                    data_types: list = None, upload_to_gcs: bool = True) -> dict:
         """Generate a comprehensive missing data report"""
         logger.info("Generating missing data report")
         
-        if data_types:
-            missing_df = self.check_missing_data_by_type(start_date, end_date, venues, instrument_types, data_types)
-        else:
-            missing_df = self.check_missing_data(start_date, end_date, venues, instrument_types)
+        # Always use check_missing_data_by_type to get data type breakdown
+        missing_df = self.check_missing_data_by_type(start_date, end_date, venues, instrument_types, data_types)
         
         if missing_df.empty:
             return {

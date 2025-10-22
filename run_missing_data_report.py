@@ -117,7 +117,8 @@ async def generate_missing_data_reports(start_date: datetime, end_date: datetime
     data_validator = DataValidator(config.gcp.bucket)
     
     if data_types is None:
-        data_types = ['trades', 'book_snapshot_5']
+        # Let DataValidator determine all available data types dynamically
+        data_types = None
     
     logger.info("============================================================")
     logger.info("📊 MISSING DATA REPORT GENERATION")
@@ -125,7 +126,7 @@ async def generate_missing_data_reports(start_date: datetime, end_date: datetime
     logger.info(f"Date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
     logger.info(f"Venues: {venues or 'all'}")
     logger.info(f"Instrument types: {instrument_types or 'all'}")
-    logger.info(f"Data types: {data_types}")
+    logger.info(f"Data types: {data_types or 'all available data types'}")
     logger.info(f"Dry run: {dry_run}")
     logger.info("============================================================")
     
