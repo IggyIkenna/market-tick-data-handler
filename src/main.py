@@ -22,7 +22,7 @@ import os
 import argparse
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -291,6 +291,75 @@ class TickDataDownloadHandler(ModeHandler):
         
         return results
 
+class MissingDataDownloadHandler(ModeHandler):
+    """Handles downloading only missing data based on missing data reports"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.download_orchestrator = DownloadOrchestrator(self.gcs_bucket, self.tardis_api_key)
+    
+    async def run(self, start_date: datetime, end_date: datetime,
+                  venues: List[str] = None, instrument_types: List[str] = None,
+                  data_types: List[str] = None, max_instruments: int = None,
+                  shard_index: int = None, total_shards: int = None, **kwargs):
+        """Download only missing data based on missing data reports from GCS"""
+        logger.info(f"📥 Starting missing data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        if data_types is None:
+            data_types = ['trades', 'book_snapshot_5']
+        
+        results = {
+            'total_days': 0,
+            'processed_days': 0,
+            'total_downloads': 0,
+            'failed_downloads': 0,
+            'errors': []
+        }
+        
+        # Process each day
+        current_date = start_date
+        while current_date <= end_date:
+            results['total_days'] += 1
+            logger.info(f"📅 Processing missing data for {current_date.strftime('%Y-%m-%d')}...")
+            
+            try:
+                download_result = await self.download_orchestrator.download_missing_data(
+                    date=current_date,
+                    venues=venues,
+                    instrument_types=instrument_types,
+                    data_types=data_types,
+                    max_instruments=max_instruments,
+                    shard_index=shard_index,
+                    total_shards=total_shards
+                )
+                
+                if download_result['status'] == 'success':
+                    results['processed_days'] += 1
+                    results['total_downloads'] += download_result['processed']
+                    results['failed_downloads'] += download_result['failed']
+                    logger.info(f"✅ Downloaded missing data for {current_date.strftime('%Y-%m-%d')}: {download_result['processed']} processed, {download_result['failed']} failed")
+                elif download_result['status'] == 'no_missing_data':
+                    logger.info(f"✅ No missing data for {current_date.strftime('%Y-%m-%d')}")
+                    results['processed_days'] += 1
+                else:
+                    logger.warning(f"⚠️ No targets found for {current_date.strftime('%Y-%m-%d')}")
+                    results['processed_days'] += 1
+                    
+            except Exception as e:
+                logger.error(f"❌ Error processing {current_date.strftime('%Y-%m-%d')}: {e}")
+                results['errors'].append(f"{current_date.strftime('%Y-%m-%d')}: {str(e)}")
+            
+            current_date += timedelta(days=1)
+        
+        logger.info('🎉 MISSING DATA DOWNLOAD COMPLETED')
+        logger.info(f"📊 Total days: {results['total_days']}")
+        logger.info(f"✅ Processed days: {results['processed_days']}")
+        logger.info(f"📈 Total downloads: {results['total_downloads']}")
+        logger.info(f"❌ Failed downloads: {results['failed_downloads']}")
+        logger.info(f"❌ Errors: {len(results['errors'])}")
+        
+        return results
+
 class DataValidationHandler(ModeHandler):
     """Handles data validation and missing data checking"""
     
@@ -519,9 +588,9 @@ Examples:
     # Mode selection
     parser.add_argument(
         '--mode', 
-        choices=['instruments', 'download', 'validate', 'full-pipeline'],
+        choices=['instruments', 'download', 'download-missing', 'validate', 'full-pipeline'],
         required=True,
-        help='Operation mode: instruments (generate definitions), download (tick data), validate (check missing data), full-pipeline (complete flow)'
+        help='Operation mode: instruments (generate definitions), download (tick data), download-missing (download only missing data), validate (check missing data), full-pipeline (complete flow)'
     )
     
     # Date range
@@ -672,6 +741,18 @@ async def main():
             )
         elif args.mode == 'download':
             handler = TickDataDownloadHandler(config)
+            result = await handler.run(
+                start_date=start_date,
+                end_date=end_date,
+                venues=args.venues,
+                instrument_types=args.instrument_types,
+                data_types=args.data_types,
+                max_instruments=args.max_instruments,
+                shard_index=args.shard_index,
+                total_shards=args.total_shards
+            )
+        elif args.mode == 'download-missing':
+            handler = MissingDataDownloadHandler(config)
             result = await handler.run(
                 start_date=start_date,
                 end_date=end_date,

@@ -248,7 +248,7 @@ class DataValidator:
     
     def generate_missing_data_report(self, start_date: datetime, end_date: datetime,
                                    venues: list = None, instrument_types: list = None,
-                                   data_types: list = None) -> dict:
+                                   data_types: list = None, upload_to_gcs: bool = True) -> dict:
         """Generate a comprehensive missing data report"""
         logger.info("Generating missing data report")
         
@@ -290,6 +290,71 @@ class DataValidator:
             data_type_coverage = missing_df.groupby('data_type').size().reset_index(name='missing_count')
             report['data_type_coverage'] = data_type_coverage.to_dict('records')
         
+        # Upload missing data report to GCS if requested
+        if upload_to_gcs and not missing_df.empty:
+            self._upload_missing_data_report_to_gcs(missing_df, start_date, end_date, venues, instrument_types, data_types)
+        
         return report
+    
+    def _upload_missing_data_report_to_gcs(self, missing_df: pd.DataFrame, start_date: datetime, 
+                                         end_date: datetime, venues: list = None, 
+                                         instrument_types: list = None, data_types: list = None):
+        """Upload missing data report to GCS as daily parquet files"""
+        try:
+            # Create GCS path for missing data reports
+            # Format: missing_data_reports/by_date/day-{date}/missing_data.parquet
+            date_str = start_date.strftime('%Y-%m-%d')
+            gcs_path = f"missing_data_reports/by_date/day-{date_str}/missing_data.parquet"
+            
+            # Add metadata to the DataFrame
+            missing_df['report_date'] = date_str
+            missing_df['venues_filter'] = ','.join(venues) if venues else 'all'
+            missing_df['instrument_types_filter'] = ','.join(instrument_types) if instrument_types else 'all'
+            missing_df['data_types_filter'] = ','.join(data_types) if data_types else 'all'
+            missing_df['generated_at'] = datetime.now().isoformat()
+            
+            # Upload to GCS
+            blob = self.bucket.blob(gcs_path)
+            
+            # Convert DataFrame to parquet bytes
+            import io
+            parquet_buffer = io.BytesIO()
+            missing_df.to_parquet(parquet_buffer, index=False, engine='pyarrow')
+            parquet_buffer.seek(0)
+            
+            # Upload to GCS
+            blob.upload_from_file(parquet_buffer, content_type='application/octet-stream')
+            
+            logger.info(f"📤 Uploaded missing data report to GCS: gs://{self.bucket.name}/{gcs_path}")
+            logger.info(f"   - {len(missing_df)} missing entries for {date_str}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to upload missing data report to GCS: {e}")
+    
+    def get_missing_data_from_gcs(self, date: datetime) -> pd.DataFrame:
+        """Read missing data report from GCS for a specific date"""
+        try:
+            date_str = date.strftime('%Y-%m-%d')
+            gcs_path = f"missing_data_reports/by_date/day-{date_str}/missing_data.parquet"
+            
+            blob = self.bucket.blob(gcs_path)
+            
+            if not blob.exists():
+                logger.info(f"No missing data report found for {date_str}")
+                return pd.DataFrame()
+            
+            # Download and read parquet file
+            import io
+            parquet_data = blob.download_as_bytes()
+            parquet_buffer = io.BytesIO(parquet_data)
+            
+            missing_df = pd.read_parquet(parquet_buffer)
+            logger.info(f"📥 Loaded missing data report from GCS: {len(missing_df)} missing entries for {date_str}")
+            
+            return missing_df
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to read missing data report from GCS for {date_str}: {e}")
+            return pd.DataFrame()
 
 

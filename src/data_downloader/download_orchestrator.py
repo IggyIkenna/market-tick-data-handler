@@ -127,6 +127,142 @@ class DownloadOrchestrator:
         logger.info(f"Download and upload completed: {results['processed']} processed, {results['failed']} failed")
         return results
     
+    async def download_missing_data(self, date: datetime, 
+                                  venues: list = None,
+                                  instrument_types: list = None,
+                                  data_types: list = None,
+                                  max_instruments: int = None,
+                                  shard_index: int = None,
+                                  total_shards: int = None) -> dict:
+        """
+        Download only missing data based on missing data reports from GCS
+        
+        Args:
+            date: Date to download missing data for
+            venues: List of venues to include
+            instrument_types: List of instrument types to include
+            data_types: List of data types to download
+            max_instruments: Maximum number of instruments to process
+            shard_index: Shard index for distributed processing
+            total_shards: Total number of shards for distributed processing
+            
+        Returns:
+            dict: Download results summary
+        """
+        logger.info(f"Starting missing data download for {date.strftime('%Y-%m-%d')}")
+        
+        # Import DataValidator to read missing data reports
+        from src.data_validator.data_validator import DataValidator
+        data_validator = DataValidator(self.gcs_bucket)
+        
+        # Get missing data report from GCS
+        missing_df = data_validator.get_missing_data_from_gcs(date)
+        
+        if missing_df.empty:
+            logger.info(f"No missing data found for {date.strftime('%Y-%m-%d')}")
+            return {'status': 'no_missing_data', 'processed': 0}
+        
+        # Convert missing data to download targets
+        targets = self._convert_missing_data_to_targets(missing_df, venues, instrument_types, data_types)
+        
+        if not targets:
+            logger.info("No download targets found after filtering")
+            return {'status': 'no_targets', 'processed': 0}
+        
+        # Apply sharding if specified
+        if shard_index is not None and total_shards is not None:
+            targets = self._apply_sharding(targets, shard_index, total_shards)
+            logger.info(f"Applied sharding: shard {shard_index}/{total_shards}, processing {len(targets)} missing instruments")
+        
+        # Apply max_instruments limit
+        if max_instruments and len(targets) > max_instruments:
+            targets = targets[:max_instruments]
+            logger.info(f"Limited to {max_instruments} instruments")
+        
+        logger.info(f"Processing {len(targets)} missing instruments with {self.max_parallel_downloads} parallel downloads")
+        
+        # Performance tracking
+        start_time = time.time()
+        results = {
+            'status': 'success',
+            'processed': 0,
+            'failed': 0,
+            'uploaded_files': [],
+            'total_missing_instruments': len(targets),
+            'start_time': start_time
+        }
+        
+        try:
+            # Process instruments in batches to manage memory
+            for batch_start in range(0, len(targets), self.batch_size):
+                batch_end = min(batch_start + self.batch_size, len(targets))
+                batch_targets = targets[batch_start:batch_end]
+                
+                logger.info(f"Processing batch {batch_start//self.batch_size + 1}: instruments {batch_start+1}-{batch_end} of {len(targets)}")
+                
+                # Process batch with parallel downloads
+                batch_results = await self._process_batch_parallel(batch_targets, date, data_types)
+                
+                # Update results
+                results['processed'] += batch_results['processed']
+                results['failed'] += batch_results['failed']
+                results['uploaded_files'].extend(batch_results['uploaded_files'])
+                
+                # Log progress
+                elapsed = time.time() - start_time
+                rate = results['processed'] / elapsed if elapsed > 0 else 0
+                eta = (len(targets) - results['processed'] - results['failed']) / rate if rate > 0 else 0
+                logger.info(f"Progress: {results['processed'] + results['failed']}/{len(targets)} processed, {rate:.1f} files/sec, ETA: {eta/60:.1f} min")
+                
+        finally:
+            # Always close the connector, even if an error occurs
+            await self.tardis_connector.close()
+        
+        logger.info(f"Missing data download completed: {results['processed']} processed, {results['failed']} failed")
+        return results
+    
+    def _convert_missing_data_to_targets(self, missing_df: pd.DataFrame, venues: list = None, 
+                                       instrument_types: list = None, data_types: list = None) -> List[Dict]:
+        """Convert missing data DataFrame to download targets"""
+        targets = []
+        
+        # Filter by venues if specified
+        if venues:
+            missing_df = missing_df[missing_df['instrument_key'].str.contains('|'.join(venues), case=False, na=False)]
+        
+        # Filter by instrument types if specified
+        if instrument_types:
+            missing_df = missing_df[missing_df['instrument_key'].str.contains('|'.join(instrument_types), case=False, na=False)]
+        
+        # Filter by data types if specified
+        if data_types and 'data_type' in missing_df.columns:
+            missing_df = missing_df[missing_df['data_type'].isin(data_types)]
+        
+        # Convert to download targets
+        for _, row in missing_df.iterrows():
+            instrument_key = row['instrument_key']
+            
+            # Parse instrument key to get exchange and symbol
+            # Format: EXCHANGE-TYPE:INSTRUMENT_TYPE:SYMBOL
+            parts = instrument_key.split(':')
+            if len(parts) >= 3:
+                exchange_part = parts[0]  # e.g., "OKX-SWAP"
+                instrument_type = parts[1]  # e.g., "PERP"
+                symbol = parts[2]  # e.g., "FIL-USDT"
+                
+                # Convert exchange format (OKX-SWAP -> okx-swap)
+                tardis_exchange = exchange_part.lower()
+                tardis_symbol = symbol
+                
+                targets.append({
+                    'instrument_key': instrument_key,
+                    'tardis_exchange': tardis_exchange,
+                    'tardis_symbol': tardis_symbol,
+                    'data_type': row.get('data_type', 'trades')  # Default to trades if not specified
+                })
+        
+        return targets
+    
     async def _process_batch_parallel(self, batch_targets: List[Dict], date: datetime, data_types: List[str]) -> Dict[str, Any]:
         """Process a batch of instruments with parallel downloads and uploads"""
         semaphore = asyncio.Semaphore(self.max_parallel_downloads)
