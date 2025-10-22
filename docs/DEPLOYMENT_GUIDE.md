@@ -129,18 +129,19 @@ gcloud builds submit --config orchestration/cloudbuild.yaml
 ### Data Organization
 ```
 gs://market-data-tick/
-├── 2023-05-23/
-│   ├── trades/
-│   │   ├── binance-spot/
-│   │   │   ├── BTCUSDT/
-│   │   │   └── ETHUSDT/
-│   │   └── binance-futures/
-│   ├── book_snapshot_5/
-│   ├── quotes/
-│   ├── derivative_ticker/
-│   └── liquidations/
-└── 2025-10-20/
-    └── ...
+├── instrument_availability/
+│   └── by_date/
+│       └── day-2023-05-23/
+│           └── instruments.parquet
+└── raw_tick_data/
+    └── by_date/
+        └── day-2023-05-23/
+            ├── data_type-trades/
+            │   ├── BINANCE:SPOT_PAIR:BTC-USDT.parquet
+            │   └── DERIBIT:PERP:BTC-USDT.parquet
+            └── data_type-book_snapshot_5/
+                ├── BINANCE:SPOT_PAIR:BTC-USDT.parquet
+                └── DERIBIT:PERP:BTC-USDT.parquet
 ```
 
 ## Monitoring and Troubleshooting
@@ -155,7 +156,7 @@ gcloud compute instances list --filter="name~tick-data-vm"
 gcloud compute instances get-serial-port-output tick-data-vm-0 --zone=asia-northeast1-a
 
 # Monitor GCS uploads
-gsutil ls gs://market-data-tick/2023-05-23/
+gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/
 ```
 
 ### Common Issues
@@ -224,11 +225,11 @@ gcloud compute instances get-serial-port-output VM_NAME --zone=asia-northeast1-a
 
 ```bash
 # Check data completeness
-gsutil ls gs://market-data-tick/2023-05-23/trades/binance-spot/ | wc -l
+gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/data_type-trades/ | wc -l
 
 # Verify Parquet files
-gsutil cp gs://market-data-tick/2023-05-23/trades/binance-spot/BTCUSDT/trades_2023-05-23_BTCUSDT_spot.parquet /tmp/
-python -c "import pandas as pd; df = pd.read_parquet('/tmp/trades_2023-05-23_BTCUSDT_spot.parquet'); print(f'Records: {len(df)}, Columns: {list(df.columns)}')"
+gsutil cp gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/data_type-trades/BINANCE:SPOT_PAIR:BTC-USDT.parquet /tmp/
+python -c "import pandas as pd; df = pd.read_parquet('/tmp/BINANCE:SPOT_PAIR:BTC-USDT.parquet'); print(f'Records: {len(df)}, Columns: {list(df.columns)}')"
 ```
 
 ## Next Steps
@@ -248,10 +249,10 @@ For issues or questions:
 
 ## Files Reference
 
-- `orchestration/orchestrate-tick-download.sh`: Main deployment script
-- `orchestration/vm-startup-script.sh`: VM startup configuration
-- `orchestration/monitor-tick-download.sh`: Monitoring and debugging
-- `orchestration/cleanup-tick-vms.sh`: Cleanup script
-- `orchestration/setup-iam.sh`: IAM permissions setup
-- `scripts/vm_data_downloader.py`: Main data download logic
-- `gcs_upload_service.py`: GCS upload service
+- `deploy/vm/shard-deploy.sh`: Main deployment script for multiple VMs
+- `deploy/vm/deploy-instruments.sh`: Single VM instrument deployment
+- `deploy/vm/deploy-tardis.sh`: Single VM data download deployment
+- `deploy/vm/build-images.sh`: Docker image build and push
+- `deploy/local/run-main.sh`: Local execution convenience script
+- `src/main.py`: Main entry point with four modes (instruments, download, validate, full-pipeline)
+- `src/data_validator/data_validator.py`: Data validation functionality

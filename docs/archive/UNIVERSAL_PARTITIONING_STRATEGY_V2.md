@@ -18,22 +18,22 @@ gs://market-data-tick/raw_tick_data/
 ├── by_date/
 │   ├── data_type-trades/
 │   │   ├── venue-binance/
-│   │   │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-│   │   │   └── binance:SPOT_ASSET:ETH-USDT.parquet
+│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+│   │   │   └── binance:SPOT_PAIR:ETH-USDT.parquet
 │   │   └── venue-deribit/
 │   │       ├── deribit:Perp:BTC-USDT.parquet
 │   │       └── deribit:Option:BTC-USD-50000-241225-C.parquet
 │   └── data_type-book_snapshot_5/
 │       ├── venue-binance/
-│       │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-│       │   └── binance:SPOT_ASSET:ETH-USDT.parquet
+│       │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+│       │   └── binance:SPOT_PAIR:ETH-USDT.parquet
 │       └── venue-deribit/
 │           └── deribit:Perp:BTC-USDT.parquet
 ├── by_venue/
 │   ├── data_type-trades/
 │   │   ├── venue-binance/
-│   │   │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-│   │   │   └── binance:SPOT_ASSET:ETH-USDT.parquet
+│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+│   │   │   └── binance:SPOT_PAIR:ETH-USDT.parquet
 │   │   └── venue-deribit/
 │   │       ├── deribit:Perp:BTC-USDT.parquet
 │   │       └── deribit:Option:BTC-USD-50000-241225-C.parquet
@@ -43,16 +43,16 @@ gs://market-data-tick/raw_tick_data/
 └── by_type/
     ├── data_type-trades/
     │   ├── type-spot/
-    │   │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-    │   │   └── binance:SPOT_ASSET:ETH-USDT.parquet
+    │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+    │   │   └── binance:SPOT_PAIR:ETH-USDT.parquet
     │   ├── type-perpetual/
     │   │   └── deribit:Perp:BTC-USDT.parquet
     │   └── type-option/
     │       └── deribit:Option:BTC-USD-50000-241225-C.parquet
     └── data_type-book_snapshot_5/
         ├── type-spot/
-        │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-        │   └── binance:SPOT_ASSET:ETH-USDT.parquet
+        │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+        │   └── binance:SPOT_PAIR:ETH-USDT.parquet
         └── type-perpetual/
             └── deribit:Perp:BTC-USDT.parquet
 ```
@@ -129,7 +129,7 @@ btc_trades = reader.read_raw_tick_data(
 )
 
 # ✅ Fast: All BTC-related instruments across venues
-btc_spot = reader.read_raw_tick_data(date, instrument_id='binance:SPOT_ASSET:BTC-USDT')
+btc_spot = reader.read_raw_tick_data(date, instrument_id='binance:SPOT_PAIR:BTC-USDT')
 btc_perp = reader.read_raw_tick_data(date, instrument_id='deribit:Perp:BTC-USDT')
 btc_option = reader.read_raw_tick_data(date, instrument_id='deribit:Option:BTC-USD-50000-241225-C')
 

@@ -70,7 +70,7 @@ class CanonicalInstrumentKeyGenerator:
             
         # Map symbol types to canonical instrument types (uppercase)
         instrument_type_mapping = {
-            'spot': 'SPOT_ASSET',
+            'spot': 'SPOT_PAIR',
             'perpetual': 'PERP',
             'future': 'FUTURE',
             'option': 'OPTION',
@@ -91,7 +91,7 @@ class CanonicalInstrumentKeyGenerator:
             return None
             
         # Generate canonical symbol based on instrument type
-        if instrument_type == 'SPOT_ASSET':
+        if instrument_type == 'SPOT_PAIR':
             canonical_symbol = f"{base_asset}-{quote_asset}"
             
         elif instrument_type == 'PERP':
@@ -163,10 +163,10 @@ class CanonicalInstrumentKeyGenerator:
         """Get available Tardis data types for this instrument type based on hardcoded logic"""
         base_data_types = ["trades", "book_snapshot_5"]  # Removed quotes as it's embedded in book_snapshot_5
         
-        if "SPOT_ASSET" in instrument_key:
+        if "SPOT_PAIR" in instrument_key:
             # Spot pairs: trades, book_snapshot_5
             return base_data_types
-        elif "PERP" in instrument_key:
+        elif "PERPETUAL" in instrument_key:
             # Perpetuals: trades, book_snapshot_5, derivative_ticker, liquidations
             return base_data_types + ["derivative_ticker", "liquidations"]
         elif "FUTURE" in instrument_key:
@@ -426,10 +426,8 @@ class CanonicalInstrumentKeyGenerator:
                     # Generate attributes
                     attributes = self.generate_attributes(exchange, symbol_type, symbol_id, symbol_info, hardcoded_data_types)
                     
-                    stats['generated'] += 1
-                    
-            # Create flattened structure for Parquet/BigQuery compatibility
-            instruments[instrument_key] = {
+                    # Create flattened structure for Parquet/BigQuery compatibility
+                    instruments[instrument_key] = {
                 'instrument_key': instrument_key,
                 
                 # Extract canonical venue and instrument type from instrument_key
@@ -472,7 +470,9 @@ class CanonicalInstrumentKeyGenerator:
                 'min_size': attributes.get('min_size'),
                 'ccxt_symbol': attributes.get('ccxt_symbol', ''),
                 'ccxt_exchange': attributes.get('ccxt_exchange', ''),
-            }
+                    }
+                    
+                    stats['generated'] += 1
         
         # After processing regular symbols, fetch individual Deribit options
         # Temporarily disabled to avoid hanging

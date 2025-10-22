@@ -2,7 +2,7 @@
 
 ## What Was Removed
 
-The following redundant scripts have been removed from `scripts/local/`:
+The following redundant scripts have been removed from `deploylocal/`:
 
 1. ❌ `build-all.sh` - No longer needed (Docker Compose handles building)
 2. ❌ `run-instrument-generation.sh` - Replaced by `run-main.sh`
@@ -10,7 +10,7 @@ The following redundant scripts have been removed from `scripts/local/`:
 
 ## What Remains
 
-Only one script remains in `scripts/local/`:
+Only one script remains in `deploylocal/`:
 
 ✅ `run-main.sh` - Single convenience script for all operations
 
@@ -18,7 +18,7 @@ Only one script remains in `scripts/local/`:
 
 ### Before (Multiple Scripts)
 ```
-scripts/local/
+deploylocal/
 ├── build-all.sh                    # ❌ Redundant
 ├── run-instrument-generation.sh    # ❌ Redundant  
 ├── run-tardis-download.sh          # ❌ Redundant
@@ -27,7 +27,7 @@ scripts/local/
 
 ### After (Single Script)
 ```
-scripts/local/
+deploylocal/
 └── run-main.sh                     # ✅ Single script for everything
 ```
 
@@ -43,9 +43,9 @@ scripts/local/
 
 ```bash
 # All operations now use the same script
-./scripts/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
-./scripts/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
-./scripts/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+./deploylocal/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
+./deploylocal/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
+./deploylocal/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 
 # Or use the Python module directly
 python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
@@ -70,7 +70,7 @@ cd docker/tardis-download && docker-compose up --build
 The migration from multiple scattered scripts to a single centralized entry point is now complete. The new architecture provides:
 
 - ✅ **Single entry point** (`src/main.py`)
-- ✅ **Single convenience script** (`scripts/local/run-main.sh`)
+- ✅ **Single convenience script** (`deploylocal/run-main.sh`)
 - ✅ **Environment-based configuration** (`.env` files)
 - ✅ **Docker-friendly deployment** (updated Dockerfiles)
 - ✅ **Comprehensive documentation** (usage guides and examples)

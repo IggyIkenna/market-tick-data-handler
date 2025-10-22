@@ -58,7 +58,7 @@ class FullPipelineHandler(ModeHandler):
 
 ✅ **Full Pipeline Test Successful**:
 ```bash
-./scripts/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-23 --verbose
+./deploylocal/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-23 --verbose
 ```
 
 **Results**:
@@ -86,7 +86,7 @@ class FullPipelineHandler(ModeHandler):
 
 ### 4. **Maintained Compatibility**
 - **Same CLI interface** - no breaking changes
-- **Same script usage** - `./scripts/local/run-main.sh` works exactly the same
+- **Same script usage** - `./deploylocal/run-main.sh` works exactly the same
 - **Same Docker support** - all Docker configurations still work
 
 ## Usage (Unchanged)
@@ -95,11 +95,11 @@ The user experience remains exactly the same:
 
 ```bash
 # Full pipeline (now uses DownloadOrchestrator directly)
-./scripts/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+./deploylocal/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 
 # Individual modes (unchanged)
-./scripts/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
-./scripts/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
+./deploylocal/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
+./deploylocal/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ## Architecture Now
@@ -116,7 +116,7 @@ src/main.py (Entry Point)
 src/data_downloader/
 └── download_orchestrator.py     ← Real workhorse (unchanged)
 
-scripts/local/
+deploylocal/
 └── run-main.sh                  ← Single convenience script
 ```
 

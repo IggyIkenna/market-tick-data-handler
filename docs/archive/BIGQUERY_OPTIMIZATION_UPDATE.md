@@ -67,7 +67,7 @@ btc_trades = reader.read_raw_tick_data(
 )
 
 # ✅ Fast: All BTC-related instruments across venues
-btc_spot = reader.read_raw_tick_data(date, instrument_id='binance:SPOT_ASSET:BTC-USDT')
+btc_spot = reader.read_raw_tick_data(date, instrument_id='binance:SPOT_PAIR:BTC-USDT')
 btc_perp = reader.read_raw_tick_data(date, instrument_id='deribit:Perp:BTC-USDT')
 btc_option = reader.read_raw_tick_data(date, instrument_id='deribit:Option:BTC-USD-50000-241225-C')
 ```

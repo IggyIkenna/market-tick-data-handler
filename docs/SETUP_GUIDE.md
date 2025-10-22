@@ -138,7 +138,7 @@ gsutil iam ch serviceAccount:tick-data-handler@central-element-323112.iam.gservi
 4. Test connection:
 
 ```bash
-python scripts/test_tardis_connection.py
+python deploytest_tardis_connection.py
 ```
 
 ## Local Development
@@ -146,51 +146,61 @@ python scripts/test_tardis_connection.py
 ### 1. Project Structure
 
 ```
-market_data_tick_handler/
-├── market_data_tick_handler/          # Main package
-│   ├── __init__.py
-│   ├── config.py                      # Configuration management
-│   ├── src/
-│   │   ├── models.py                  # Data models
-│   ├── instrument_registry.py         # Instrument definitions
-│   ├── tardis_connector.py            # Tardis API client
-│   ├── gcs_manager.py                 # GCS operations
-│   ├── storage_manager.py             # Local storage
-│   ├── data_downloader.py             # Main download service
-│   ├── query_service.py               # Data query service
-│   ├── gap_detector.py                # Gap detection
-│   ├── api.py                         # FastAPI service
-│   ├── cli.py                         # CLI interface
-│   └── utils/                         # Utility modules
-├── tests/                             # Test suite
-├── scripts/                           # Utility scripts
+market-tick-data-handler/
+├── src/                               # Main source code
+│   ├── main.py                        # Centralized entry point
+│   ├── models.py                      # Data models
+│   ├── instrument_processor/          # Instrument definition generation
+│   │   ├── canonical_key_generator.py
+│   │   └── gcs_uploader.py
+│   ├── data_downloader/               # Data download and upload
+│   │   ├── download_orchestrator.py
+│   │   ├── instrument_reader.py
+│   │   └── tardis_connector.py
+│   └── data_validator/                # Data validation
+│       └── data_validator.py
+├── deploy/                            # Deployment scripts
+│   ├── local/                         # Local execution
+│   │   └── run-main.sh
+│   └── vm/                            # VM deployment
+│       ├── deploy-instruments.sh
+│       ├── deploy-tardis.sh
+│       ├── build-images.sh
+│       └── shard-deploy.sh
+├── docker/                            # Docker configurations
+│   ├── instrument-generation/
+│   ├── tardis-download/
+│   └── shared/
 ├── docs/                              # Documentation
+├── config.py                          # Configuration management
 ├── requirements.txt                   # Dependencies
-├── Dockerfile                         # Container config
 └── .env                              # Environment variables
 ```
 
 ### 2. Running the Service
 
-#### Start FastAPI Service
+#### Using the Main Entry Point
 ```bash
-# Development mode with auto-reload
-uvicorn market_data_tick_handler.api:app --reload --host 0.0.0.0 --port 8000
+# Generate instrument definitions
+python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
 
-# Production mode
-uvicorn market_data_tick_handler.api:app --host 0.0.0.0 --port 8000
+# Download tick data
+python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
+
+# Validate data
+python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
+
+# Run full pipeline (instruments → download → validate)
+python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
-#### Using CLI
+#### Using Convenience Scripts
 ```bash
-# Download data for specific date
-python -m market_data_tick_handler.cli download --date 2024-10-20
-
-# Query data
-python -m market_data_tick_handler.cli query --instrument binance-spot:SPOT_ASSET:BTC-USDT --start-date 2024-10-20 --end-date 2024-10-21
-
-# Check for gaps
-python -m market_data_tick_handler.cli check-gaps --start-date 2024-10-20 --end-date 2024-10-21
+# Use the convenience script for all operations
+./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh validate --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### 3. Development Tools
@@ -291,80 +301,64 @@ docker-compose down
 
 ## VM Deployment
 
-### 1. VM Creation
+### 1. VM Deployment
 
+#### Single VM for Development/Testing
 ```bash
-# Create 30 VMs for sharding
-for i in {0..29}; do
-  gcloud compute instances create tick-data-downloader-$i \
-    --zone=asia-northeast1-c \
-    --machine-type=e2-highmem-8 \
-    --boot-disk-size=100GB \
-    --boot-disk-type=pd-standard \
-    --image-family=ubuntu-2004-lts \
-    --image-project=ubuntu-os-cloud \
-    --tags=tick-data-downloader \
-    --metadata=shard-index=$i
-done
+# Deploy single VM for instrument generation
+./deploy/vm/deploy-instruments.sh deploy
+
+# Deploy single VM for data download
+./deploy/vm/deploy-tardis.sh deploy
+```
+
+#### Multiple VMs for Production
+```bash
+# Deploy multiple VMs with sharding
+./deploy/vm/shard-deploy.sh instruments --start-date 2023-05-23 --end-date 2023-05-25 --shards 10
+./deploy/vm/shard-deploy.sh tardis --start-date 2023-05-23 --end-date 2023-05-25 --shards 20
 ```
 
 ### 2. VM Configuration
 
-#### Install Dependencies
+The VM deployment scripts handle all configuration automatically. They will:
+
+1. **Install Dependencies**: Python, pip, git, gcloud CLI
+2. **Clone Repository**: Download the latest code
+3. **Setup Environment**: Create virtual environment and install dependencies
+4. **Configure Credentials**: Set up GCP service account authentication
+5. **Deploy Application**: Start the appropriate service based on deployment type
+
+#### Manual Configuration (if needed)
 ```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
+# SSH into VM
+gcloud compute ssh VM_NAME --zone=asia-northeast1-c
 
-# Install Python and dependencies
-sudo apt install -y python3.9 python3.9-venv python3-pip git
+# Check application status
+cd /opt/market-tick-data-handler
+tail -f logs/*.log
 
-# Install Google Cloud SDK
-curl https://sdk.cloud.google.com | bash
-exec -l $SHELL
-gcloud init
+# Restart service if needed
+sudo systemctl restart market-tick-handler
 ```
 
-#### Deploy Application
-```bash
-# Clone repository
-git clone https://github.com/your-org/market-data-tick-handler.git
-cd market-data-tick-handler
+### 3. Data Organization
 
-# Create virtual environment
-python3.9 -m venv venv
-source venv/bin/activate
+The system uses a single partition strategy for optimal performance:
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Copy credentials
-cp /path/to/credentials.json central-element-323112-e35fb0ddafe2.json
-
-# Configure environment
-cp .env.example .env
-# Edit .env with VM-specific settings
 ```
-
-### 3. Startup Script
-
-Create `vm_startup_script.sh`:
-
-```bash
-#!/bin/bash
-
-# Get shard index from metadata
-SHARD_INDEX=$(curl -H "Metadata-Flavor: Google" http://metadata.google.internal/computeMetadata/v1/instance/attributes/shard-index)
-
-# Set environment variables
-export SHARD_INDEX=$SHARD_INDEX
-export TOTAL_SHARDS=30
-export LOG_LEVEL=INFO
-export LOG_DESTINATION=gcp
-
-# Start the service
-cd /home/ubuntu/market-data-tick-handler
-source venv/bin/activate
-python -m market_data_tick_handler.data_downloader --shard-index $SHARD_INDEX
+gs://market-data-tick/
+├── instrument_availability/
+│   └── by_date/
+│       └── day-{date}/
+│           └── instruments.parquet
+└── raw_tick_data/
+    └── by_date/
+        └── day-{date}/
+            ├── data_type-trades/
+            │   └── {instrument_key}.parquet
+            └── data_type-book_snapshot_5/
+                └── {instrument_key}.parquet
 ```
 
 ## Verification
@@ -372,7 +366,7 @@ python -m market_data_tick_handler.data_downloader --shard-index $SHARD_INDEX
 ### 1. Test Tardis Connection
 
 ```bash
-python scripts/test_tardis_connection.py
+python deploytest_tardis_connection.py
 ```
 
 Expected output:
@@ -385,7 +379,7 @@ Expected output:
 ### 2. Test GCS Access
 
 ```bash
-python scripts/test_gcs_access.py
+python deploytest_gcs_access.py
 ```
 
 Expected output:
@@ -399,23 +393,24 @@ Expected output:
 
 ```bash
 # Download sample data
-python -m market_data_tick_handler.cli download --date 2024-10-20 --test-mode
+python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues deribit --max-instruments 5
 
 # Verify data in GCS
-gsutil ls gs://market-data-tick/data/2024-10-20/
+gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/
 ```
 
-### 4. Test API Service
+### 4. Test Full Pipeline
 
 ```bash
-# Start service
-uvicorn market_data_tick_handler.api:app --host 0.0.0.0 --port 8000 &
+# Run validation
+python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-23
 
-# Test health endpoint
-curl http://localhost:8000/health
+# Run complete pipeline
+python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-23 --max-instruments 5
 
-# Test data query
-curl "http://localhost:8000/api/v1/tick-data/binance-spot:SPOT_ASSET:BTC-USDT?start_date=2024-10-20&end_date=2024-10-21"
+# Verify all data types
+gsutil ls gs://market-data-tick/instrument_availability/by_date/day-2023-05-23/
+gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/
 ```
 
 ## Troubleshooting

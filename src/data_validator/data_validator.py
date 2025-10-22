@@ -43,7 +43,12 @@ class DataValidator:
             logger.info(f"Checking data for {current_date.strftime('%Y-%m-%d')}")
             
             # Get expected instruments for this date
-            expected_instruments = self._get_expected_instruments(current_date, venues, instrument_types)
+            expected_instruments_df = self._get_expected_instruments(current_date, venues, instrument_types)
+            
+            if expected_instruments_df.empty:
+                continue
+                
+            expected_instruments = expected_instruments_df['instrument_key'].tolist()
             
             # Check what data is actually available in GCS
             available_data = self._get_available_data(current_date, venues, instrument_types)
@@ -64,48 +69,63 @@ class DataValidator:
         return df
     
     def _get_expected_instruments(self, date: datetime, venues: list = None, 
-                                instrument_types: list = None) -> list:
-        """Get instruments that should have data for a given date"""
-        # Read instrument definitions from GCS
-        aggregated_path = f"instrument_availability/instruments_{date.strftime('%Y%m%d')}.parquet"
+                                instrument_types: list = None) -> pd.DataFrame:
+        """Get instruments that should have data for a given date with their data types"""
+        # Try multiple paths for instrument definitions (fallback strategy)
+        paths_to_try = [
+            # Optimized single partition strategy
+            f"instrument_availability/by_date/day-{date.strftime('%Y-%m-%d')}/instruments.parquet",
+            # Legacy daily aggregated file
+            f"instrument_availability/instruments_{date.strftime('%Y%m%d')}.parquet",
+            # Legacy enhanced file
+            f"instrument_availability/{date.strftime('%Y-%m-%d')}_enhanced.parquet"
+        ]
         
-        try:
-            blob = self.bucket.blob(aggregated_path)
-            if blob.exists():
-                import tempfile
-                with tempfile.NamedTemporaryFile(suffix='.parquet') as tmp_file:
-                    blob.download_to_filename(tmp_file.name)
-                    df = pd.read_parquet(tmp_file.name)
-                    
-                    # Apply filters
-                    if venues:
-                        df = df[df['venue'].isin(venues)]
-                    if instrument_types:
-                        df = df[df['instrument_type'].isin(instrument_types)]
-                    
-                    return df['instrument_key'].tolist()
-        except Exception as e:
-            logger.warning(f"Could not read instrument definitions for {date.strftime('%Y-%m-%d')}: {e}")
+        for path in paths_to_try:
+            try:
+                blob = self.bucket.blob(path)
+                if blob.exists():
+                    logger.info(f"Reading instrument definitions from: {path}")
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix='.parquet') as tmp_file:
+                        blob.download_to_filename(tmp_file.name)
+                        df = pd.read_parquet(tmp_file.name)
+                        
+                        # Apply filters
+                        if venues:
+                            df = df[df['venue'].isin(venues)]
+                        if instrument_types:
+                            df = df[df['instrument_type'].isin(instrument_types)]
+                        
+                        logger.info(f"Found {len(df)} expected instruments for {date.strftime('%Y-%m-%d')}")
+                        return df
+            except Exception as e:
+                logger.warning(f"Could not read from {path}: {e}")
+                continue
         
-        return []
+        logger.warning(f"Could not find instrument definitions for {date.strftime('%Y-%m-%d')}")
+        return pd.DataFrame()
     
     def _get_available_data(self, date: datetime, venues: list = None, 
                            instrument_types: list = None) -> list:
         """Get instruments that actually have data in GCS for a given date"""
         available_instruments = []
         
-        # Check raw_tick_data partition
-        prefix = f"raw_tick_data/by_date/year-{date.year}/month-{date.month:02d}/day-{date.day:02d}/"
+        # Check raw_tick_data partition using current optimized single partition strategy
+        # Pattern: raw_tick_data/by_date/day-{date}/data_type-{type}/{instrument_key}.parquet
+        date_str = date.strftime('%Y-%m-%d')
+        prefix = f"raw_tick_data/by_date/day-{date_str}/"
         
         blobs = list(self.bucket.list_blobs(prefix=prefix))
         
         for blob in blobs:
             if blob.name.endswith('.parquet'):
                 # Extract instrument key from path
-                # Path format: raw_tick_data/by_date/year-2024/month-01/day-15/venue-deribit/instrument-{key}/{data_type}.parquet
+                # Path format: raw_tick_data/by_date/day-2024-01-15/data_type-trades/{instrument_key}.parquet
                 parts = blob.name.split('/')
-                if len(parts) >= 7 and parts[6].startswith('instrument-'):
-                    instrument_key = parts[6].replace('instrument-', '')
+                if len(parts) >= 5 and parts[3].startswith('data_type-'):
+                    # The instrument key is the filename without .parquet extension
+                    instrument_key = parts[4].replace('.parquet', '')
                     available_instruments.append(instrument_key)
         
         return list(set(available_instruments))  # Remove duplicates
@@ -126,12 +146,116 @@ class DataValidator:
         
         return missing
     
+    def check_missing_data_by_type(self, start_date: datetime, end_date: datetime,
+                                 venues: list = None, instrument_types: list = None,
+                                 data_types: list = None) -> pd.DataFrame:
+        """
+        Check for missing data by data type (trades, book_snapshot_5, etc.)
+        
+        Args:
+            start_date: Start date for the check
+            end_date: End date for the check
+            venues: Optional venue filter
+            instrument_types: Optional instrument type filter
+            data_types: List of data types to check (e.g., ['trades', 'book_snapshot_5'])
+            
+        Returns:
+            DataFrame with missing data analysis by type
+        """
+        if data_types is None:
+            # Check for all available data types based on instrument definitions
+            data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'options_chain', 'liquidations']
+        
+        logger.info(f"Checking missing data by type from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"Data types to check: {data_types}")
+        
+        missing_data = []
+        current_date = start_date
+        
+        while current_date <= end_date:
+            logger.info(f"Checking data for {current_date.strftime('%Y-%m-%d')}")
+            
+            # Get expected instruments for this date with their data types
+            expected_instruments_df = self._get_expected_instruments(current_date, venues, instrument_types)
+            
+            if expected_instruments_df.empty:
+                current_date += timedelta(days=1)
+                continue
+            
+            # Check what data is actually available in GCS for each data type
+            for data_type in data_types:
+                available_data = self._get_available_data_by_type(current_date, data_type, venues, instrument_types)
+                
+                # Only check instruments that should have this data type
+                instruments_with_data_type = expected_instruments_df[
+                    expected_instruments_df['data_types'].str.contains(data_type, na=False)
+                ]['instrument_key'].tolist()
+                
+                # Find missing data for this type
+                missing = self._find_missing_data_by_type(instruments_with_data_type, available_data, current_date, data_type)
+                missing_data.extend(missing)
+            
+            current_date += timedelta(days=1)
+        
+        if missing_data:
+            df = pd.DataFrame(missing_data)
+            logger.info(f"Found {len(df)} missing data entries")
+        else:
+            df = pd.DataFrame()
+            logger.info("No missing data found")
+        
+        return df
+    
+    def _get_available_data_by_type(self, date: datetime, data_type: str, 
+                                  venues: list = None, instrument_types: list = None) -> list:
+        """Get instruments that actually have data in GCS for a specific data type and date"""
+        available_instruments = []
+        
+        # Check raw_tick_data partition for specific data type
+        date_str = date.strftime('%Y-%m-%d')
+        prefix = f"raw_tick_data/by_date/day-{date_str}/data_type-{data_type}/"
+        
+        blobs = list(self.bucket.list_blobs(prefix=prefix))
+        
+        for blob in blobs:
+            if blob.name.endswith('.parquet'):
+                # Extract instrument key from path
+                # Path format: raw_tick_data/by_date/day-2024-01-15/data_type-trades/{instrument_key}.parquet
+                parts = blob.name.split('/')
+                if len(parts) >= 5 and parts[3] == f'data_type-{data_type}':
+                    # The instrument key is the filename without .parquet extension
+                    instrument_key = parts[4].replace('.parquet', '')
+                    available_instruments.append(instrument_key)
+        
+        return list(set(available_instruments))  # Remove duplicates
+    
+    def _find_missing_data_by_type(self, expected: list, available: list, date: datetime, data_type: str) -> list:
+        """Find instruments that are expected but not available for a specific data type"""
+        missing = []
+        
+        for instrument_key in expected:
+            if instrument_key not in available:
+                missing.append({
+                    'date': date.strftime('%Y-%m-%d'),
+                    'instrument_key': instrument_key,
+                    'data_type': data_type,
+                    'status': 'missing',
+                    'expected': True,
+                    'available': False
+                })
+        
+        return missing
+    
     def generate_missing_data_report(self, start_date: datetime, end_date: datetime,
-                                   venues: list = None, instrument_types: list = None) -> dict:
+                                   venues: list = None, instrument_types: list = None,
+                                   data_types: list = None) -> dict:
         """Generate a comprehensive missing data report"""
         logger.info("Generating missing data report")
         
-        missing_df = self.check_missing_data(start_date, end_date, venues, instrument_types)
+        if data_types:
+            missing_df = self.check_missing_data_by_type(start_date, end_date, venues, instrument_types, data_types)
+        else:
+            missing_df = self.check_missing_data(start_date, end_date, venues, instrument_types)
         
         if missing_df.empty:
             return {
@@ -151,7 +275,7 @@ class DataValidator:
         # Group by instrument to see which instruments are most problematic
         instrument_coverage = missing_df.groupby('instrument_key').size().reset_index(name='missing_days')
         
-        return {
+        report = {
             'status': 'incomplete',
             'missing_count': missing_count,
             'total_days': total_days,
@@ -160,5 +284,12 @@ class DataValidator:
             'instrument_coverage': instrument_coverage.to_dict('records'),
             'summary': f"Found {missing_count} missing data entries across {total_days} days"
         }
+        
+        # Add data type breakdown if checking by type
+        if data_types and 'data_type' in missing_df.columns:
+            data_type_coverage = missing_df.groupby('data_type').size().reset_index(name='missing_count')
+            report['data_type_coverage'] = data_type_coverage.to_dict('records')
+        
+        return report
 
 

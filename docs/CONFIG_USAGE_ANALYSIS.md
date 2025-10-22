@@ -8,26 +8,26 @@
 
 ### 1. **Local Python Execution** (No Docker)
 - **Purpose**: Direct Python execution for development/testing
-- **Script**: `./scripts/local/run-main.sh`
+- **Script**: `./deploy/local/run-main.sh`
 - **Entry Point**: `python -m src.main`
 
 ### 2. **Local Docker Development**
 - **Purpose**: Local development with Docker containers
 - **Scripts**: 
-  - `./scripts/local/run-main.sh` (calls Docker)
+  - `./deploy/local/run-main.sh` (calls Docker)
   - `docker/instrument-generation/Dockerfile`
   - `docker/tardis-download/Dockerfile`
 
 ### 3. **VM Deployment - Development/Testing**
 - **Purpose**: Single VM deployment for testing
-- **Script**: `scripts/vm_data_downloader.py`
+- **Scripts**: `./deploy/vm/deploy-instruments.sh`, `./deploy/vm/deploy-tardis.sh`
 - **Scale**: 1 VM at a time
 
 ### 4. **VM Deployment - Production Orchestration**
-- **Purpose**: Massive scale production processing (60+ VMs)
-- **Script**: `scripts/vm_data_downloader.py` (in containers)
-- **Docker**: `deploy/orchestration/Dockerfile`
-- **Scale**: 60+ VMs simultaneously with sharding
+- **Purpose**: Massive scale production processing (multiple VMs)
+- **Script**: `./deploy/vm/shard-deploy.sh`
+- **Docker**: Uses Artifact Registry images
+- **Scale**: Multiple VMs simultaneously with sharding
 
 ## Config.py Usage by Mode
 
@@ -104,11 +104,11 @@ CMD ["python", "-m", "src.main", "--mode", "download", ...]
 
 #### **Instrument Definitions**
 ```python
-# scripts/vm_data_downloader.py (when used for instruments)
+# deploy/vm/deploy-instruments.sh -> src/main.py
 from config import get_config
 
 # Used by:
-- scripts/vm_data_downloader.py
+- src/main.py (InstrumentGenerationHandler)
 - src/instrument_processor/canonical_key_generator.py
 - src/instrument_processor/gcs_uploader.py
 
@@ -123,11 +123,11 @@ from config import get_config
 
 #### **Tick Download**
 ```python
-# scripts/vm_data_downloader.py
+# deploy/vm/deploy-tardis.sh -> src/main.py
 from config import get_config
 
 # Used by:
-- scripts/vm_data_downloader.py
+- src/main.py (TickDataDownloadHandler)
 - src/data_downloader/download_orchestrator.py
 - src/data_downloader/tardis_connector.py
 
@@ -147,11 +147,11 @@ from config import get_config
 
 #### **Instrument Definitions**
 ```python
-# deploy/orchestration/Dockerfile -> scripts/vm_data_downloader.py
+# deploy/vm/shard-deploy.sh -> src/main.py (in container)
 from config import get_config
 
 # Used by:
-- scripts/vm_data_downloader.py (in container)
+- src/main.py (InstrumentGenerationHandler in container)
 - src/instrument_processor/canonical_key_generator.py
 - src/instrument_processor/gcs_uploader.py
 
@@ -169,11 +169,11 @@ from config import get_config
 
 #### **Tick Download**
 ```python
-# deploy/orchestration/Dockerfile -> scripts/vm_data_downloader.py
+# deploy/vm/shard-deploy.sh -> src/main.py (in container)
 from config import get_config
 
 # Used by:
-- scripts/vm_data_downloader.py (in container)
+- src/main.py (TickDataDownloadHandler in container)
 - src/data_downloader/download_orchestrator.py
 - src/data_downloader/tardis_connector.py
 
@@ -233,13 +233,14 @@ from config import get_config
 - All 4 deployment modes
 ```
 
-### **5. scripts/vm_data_downloader.py**
+### **5. src/data_validator/data_validator.py**
 ```python
 from config import get_config
 
 # Used for:
-- VM-specific configuration (sharding, etc.)
-- Modes 3 and 4 only
+- GCS bucket configuration for validation
+- All 4 deployment modes
+- Data validation mode in src/main.py
 ```
 
 ## Configuration Sources by Mode
@@ -316,14 +317,14 @@ INSTRUMENTS_PER_SHARD=2
 
 1. **Mode 1 (Local Python)**: Direct import in `src/main.py` and related modules
 2. **Mode 2 (Local Docker)**: Same as Mode 1, but in Docker containers
-3. **Mode 3 (VM Dev)**: Used in `scripts/vm_data_downloader.py` for single VM
-4. **Mode 4 (VM Prod)**: Used in `scripts/vm_data_downloader.py` for 60+ VMs
+3. **Mode 3 (VM Dev)**: Used in `src/main.py` via VM deployment scripts
+4. **Mode 4 (VM Prod)**: Used in `src/main.py` via sharded VM deployment
 
 **Key modules using config.py**:
 - `src/main.py` (all modes)
 - `src/instrument_processor/canonical_key_generator.py` (all modes)
 - `src/data_downloader/tardis_connector.py` (all modes)
-- `scripts/vm_data_downloader.py` (modes 3 & 4)
+- `src/data_validator/data_validator.py` (all modes)
 
 **Configuration sources**:
 - Environment variables (primary)

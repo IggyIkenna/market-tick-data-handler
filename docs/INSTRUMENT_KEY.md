@@ -9,24 +9,24 @@
 - All components are UPPERCASE for consistency and readability
 - Components:
   - VENUE: enum from existing `Venue` model (e.g., BINANCE, BINANCE-FUTURES, BYBIT, BYBIT-SPOT, OKX, OKX-FUTURES, OKX-SWAP, DERIBIT, AAVE_V3, ETHERFI, LIDO, WALLET, CME, NASDAQ)
-  - INSTRUMENT_TYPE: enum: [BASETOKEN, SPOT_ASSET, SPOTASSET, PERPETUAL, FUTURE, OPTION, EQUITY, INDEX, LST, ATOKEN, DEBTTOKEN]
+  - INSTRUMENT_TYPE: enum: [BASETOKEN, SPOT_PAIR, SPOTASSET, PERPETUAL, FUTURE, OPTION, EQUITY, INDEX, LST, A_TOKEN, DEBT_TOKEN]
   - SYMBOL: string (venue-normalized symbol with specific formats per type)
 
 ### Symbol Formats by Instrument Type: **
-- **SPOT-ASSET**: actual BASE_ASSET positions held on a specific venue (e.g., BTC, ETH, USDT)
-- **SPOT_ASSET**: BASE_ASSET-QUOTE_ASSET (e.g., BTC-USDT) - routing pair for spot trading
+- **SPOT_ASSET**: actual BASE_ASSET positions held on a specific venue (e.g., BTC, ETH, USDT)
+- **SPOT_PAIR**: BASE_ASSET-QUOTE_ASSET (e.g., BTC-USDT) - routing pair for spot trading
 - **PERPETUAL**: BASE_ASSET-QUOTE_ASSET (e.g., ETH-USDT)
 - **FUTURE**: BASE_ASSET-QUOTE_ASSET-YYMMDD (e.g., BTC-USD-241225)
 - **OPTION**: BASE_ASSET-QUOTE_ASSET-YYMMDD-STRIKE-OPTION_TYPE (e.g., BTC-USD-241225-50000-CALL)
-** For DeFi Venues like AAVE_V3, ETHERFI, LIDO, there are addiitonal instrument types :LST, ATOKEN, DEBTTOKEN
+** For DeFi Venues like AAVE_V3, ETHERFI, LIDO, there are addiitonal instrument types :LST, A_TOKEN, DEBT_TOKEN
 ** For TradFi Venues like CME, NASDAQ, there are addiitonal instrument types: EQUITY, INDEX
 
 ### Examples
 - Balances (positions you hold):
-  - BINANCE:SPOT-ASSET:BTC
-  - WALLET:SPOT-ASSET:USDT
+  - BINANCE:SPOT_ASSET:BTC
+  - WALLET:SPOT_ASSET:USDT
 - Spot routing (optional, never stored as a position):
-  - BINANCE:SPOT-PAIR:BTC-USDT
+  - BINANCE:SPOT_PAIR:BTC-USDT
 - Perpetuals:
   - BYBIT:PERPETUAL:ETH-USDT
 - Futures (unified across crypto and tradfi):
@@ -36,8 +36,8 @@
   - DERIBIT:OPTION:BTC-USD-241225-50000-CALL
   - CME:OPTION:ES-202412-4500-CALL
 - DeFi:
-  - AAVE_V3:ATOKEN:AUSDT
-  - AAVE_V3:DEBTTOKEN:DEBTWETH
+  - AAVE_V3:A_TOKEN:AUSDT
+  - AAVE_V3:DEBT_TOKEN:DEBTWETH
   - ETHERFI:LST:WEETH
 
 ### Normalization Principles
@@ -45,10 +45,10 @@
 - All components are UPPERCASE for consistency
 - Option types use CALL/PUT instead of C/P for clarity
 - Crypto spot:
-  - SPOT-ASSET keys represent actual asset positions held (BTC, ETH, USDT).
+  - SPOT_ASSET keys represent actual asset positions held (BTC, ETH, USDT).
 - Spot Trading Flow:
-  - SPOT_ASSET: Used for routing and execution (BINANCE:SPOT-PAIR:BTC-USDT)
-  - When trading BTC-USDT, you execute via SPOT-PAIR but hold SPOT-ASSET positions
+  - SPOT_PAIR: Used for routing and execution (BINANCE:SPOT_PAIR:BTC-USDT)
+  - When trading BTC-USDT, you execute via SPOT_PAIR but hold SPOT_ASSET positions
 - Perps:
   - symbol is BASE_ASSET-QUOTE_ASSET (e.g., BTC-USDT) with attrs.inverse when settle != quote.
 - Futures and Options (crypto + tradfi):
@@ -95,18 +95,18 @@
 - VENUE ∈ Venue enum; INSTRUMENT_TYPE ∈ InstrumentType enum.
 - BASETOKEN: symbol is asset code (BTC, ETH, USDT, ...).
 - SPOTASSET: symbol is asset code (BTC, ETH, USDT, ...) - represents actual holdings.
-- SPOT_ASSET: symbol BASE-QUOTE; QUOTE ∈ {USD, USDT, USDC, ...}; routing only, never stored as position.
+- SPOT_PAIR: symbol BASE-QUOTE; QUOTE ∈ {USD, USDT, USDC, ...}; routing only, never stored as position.
 - PERPETUAL: symbol BASE-QUOTE; QUOTE ∈ {USD, USDT}; inverse in attrs when applicable.
 - FUTURE: attrs.expiry required; contract_size required; symbol may include expiry code.
 - OPTION: attrs.expiry, attrs.strike, attrs.option_type required.
 
 ### Worked Examples
 - BTC balance vs spot pair on Binance:
-  - BINANCE:SPOT-ASSET:BTC (actual BTC position)
-  - BINANCE:SPOT-PAIR:BTC-USDT (routing-only)
+  - BINANCE:SPOT_ASSET:BTC (actual BTC position)
+  - BINANCE:SPOT_PAIR:BTC-USDT (routing-only)
 - Spot trading workflow:
-  - Execute trade: BINANCE:SPOT-PAIR:BTC/USDT (find best route)
-  - Update positions: BINANCE:SPOT-ASSET:BTC, BINANCE:SPOT-ASSET:USDT
+  - Execute trade: BINANCE:SPOT_PAIR:BTC/USDT (find best route)
+  - Update positions: BINANCE:SPOT_ASSET:BTC, BINANCE:SPOT_ASSET:USDT
 - Perpetuals:
   - BINANCE:PERPETUAL:BTC-USDT with attrs.margin="USDT", inverse=false
 - Crypto futures:
@@ -117,17 +117,17 @@
   - DERIBIT:OPTION:BTC-USD-241225-50000-CALL with normalized expiry
   - CME:OPTION:ES-202412-4500-CALL with month-code preserved in exchange_raw_symbol
 - DeFi lending/staking:
-  - AAVE_V3:ATOKEN:AUSDT, AAVE_V3:DEBTTOKEN:DEBTWETH, ETHERFI:LST:WEETH
+  - AAVE_V3:A_TOKEN:AUSDT, AAVE_V3:DEBT_TOKEN:DEBTWETH, ETHERFI:LST:WEETH
 
 ### Expiry Handling
 - attrs.expiry holds precise UTC datetime (including half-hour if applicable).
 - Daily snapshots store attrs.expiry; an auxiliary expiry_calendar lists exact intra-day expiries per day.
 
 ### FAQ
-- Why SPOT_ASSET is routing-only? Trades result in SPOTASSET deltas; SPOT_ASSET simplifies execution routing without becoming a held position.
+- Why SPOT_PAIR is routing-only? Trades result in SPOTASSET deltas; SPOT_PAIR simplifies execution routing without becoming a held position.
 - What's the difference between BASETOKEN and SPOTASSET? BASETOKEN is a generic asset reference, SPOTASSET represents actual spot positions held on a specific venue.
 - Are CME futures different from crypto futures? Same instrument_type=FUTURE; differences live in attributes (contract_size, codes, settlement, asset_class).
 - Why UPPERCASE? Consistent formatting makes keys more readable and easier to parse programmatically.
-- How do SPOT_ASSET and SPOTASSET work together? SPOT_ASSET is used for finding the best exchange to trade a pair, SPOTASSET tracks your actual asset holdings after the trade.
+- How do SPOT_PAIR and SPOTASSET work together? SPOT_PAIR is used for finding the best exchange to trade a pair, SPOTASSET tracks your actual asset holdings after the trade.
 
 

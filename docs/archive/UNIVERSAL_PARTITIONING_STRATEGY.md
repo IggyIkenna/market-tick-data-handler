@@ -14,13 +14,13 @@ gs://market-data-tick/raw_tick_data/
 ├── by_date/
 │   ├── year-2023/month-05/day-23/
 │   │   ├── data_type-trades/
-│   │   │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-│   │   │   ├── binance:SPOT_ASSET:ETH-USDT.parquet
+│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+│   │   │   ├── binance:SPOT_PAIR:ETH-USDT.parquet
 │   │   │   ├── deribit:Perp:BTC-USDT.parquet
 │   │   │   └── deribit:Option:BTC-USD-50000-241225-C.parquet
 │   │   ├── data_type-book_snapshot_5/
-│   │   │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-│   │   │   ├── binance:SPOT_ASSET:ETH-USDT.parquet
+│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+│   │   │   ├── binance:SPOT_PAIR:ETH-USDT.parquet
 │   │   │   └── deribit:Perp:BTC-USDT.parquet
 │   │   └── data_type-options_chain/
 │   │       └── deribit:Option:BTC-USD-50000-241225-C.parquet
@@ -28,11 +28,11 @@ gs://market-data-tick/raw_tick_data/
 ├── by_venue/
 │   ├── venue-binance/year-2023/month-05/day-23/
 │   │   ├── data_type-trades/
-│   │   │   ├── binance:SPOT_ASSET:BTC-USDT.parquet
-│   │   │   └── binance:SPOT_ASSET:ETH-USDT.parquet
+│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
+│   │   │   └── binance:SPOT_PAIR:ETH-USDT.parquet
 │   │   └── data_type-book_snapshot_5/
-│   │       ├── binance:SPOT_ASSET:BTC-USDT.parquet
-│   │       └── binance:SPOT_ASSET:ETH-USDT.parquet
+│   │       ├── binance:SPOT_PAIR:BTC-USDT.parquet
+│   │       └── binance:SPOT_PAIR:ETH-USDT.parquet
 │   └── venue-deribit/year-2023/month-05/day-23/
 │       ├── data_type-trades/
 │       │   └── deribit:Perp:BTC-USDT.parquet
@@ -41,8 +41,8 @@ gs://market-data-tick/raw_tick_data/
 └── by_type/
     ├── type-spot/year-2023/month-05/day-23/
     │   └── data_type-trades/
-    │       ├── binance:SPOT_ASSET:BTC-USDT.parquet
-    │       └── binance:SPOT_ASSET:ETH-USDT.parquet
+    │       ├── binance:SPOT_PAIR:BTC-USDT.parquet
+    │       └── binance:SPOT_PAIR:ETH-USDT.parquet
     ├── type-perpetual/year-2023/month-05/day-23/
     │   └── data_type-trades/
     │       └── deribit:Perp:BTC-USDT.parquet
@@ -56,7 +56,7 @@ gs://market-data-tick/raw_tick_data/
 gs://your-bucket/processed_daily/
 ├── by_date/
 │   ├── year-2023/month-05/day-23/
-│   │   ├── venue-binance/instrument-binance:SPOT_ASSET:BTC-USDT/
+│   │   ├── venue-binance/instrument-binance:SPOT_PAIR:BTC-USDT/
 │   │   │   ├── daily_ohlcv.parquet
 │   │   │   ├── daily_features.parquet
 │   │   │   └── daily_signals.parquet
@@ -73,7 +73,7 @@ gs://your-bucket/processed_daily/
 │   │   └── binance_daily_signals.parquet
 │   └── ...
 └── by_instrument_id/
-    ├── instrument-binance:SPOT_ASSET:BTC-USDT/year-2023/month-05/
+    ├── instrument-binance:SPOT_PAIR:BTC-USDT/year-2023/month-05/
     │   ├── btcusdt_daily_ohlcv.parquet
     │   ├── btcusdt_daily_features.parquet
     │   └── btcusdt_daily_signals.parquet
@@ -89,10 +89,10 @@ gs://your-bucket/processed_daily/
 gs://your-bucket/ml_features/
 ├── by_date/
 │   ├── year-2023/month-05/day-23/
-│   │   ├── feature_type-technical/instrument-binance:SPOT_ASSET:BTC-USDT/
+│   │   ├── feature_type-technical/instrument-binance:SPOT_PAIR:BTC-USDT/
 │   │   │   ├── technical_features.parquet
 │   │   │   └── technical_signals.parquet
-│   │   ├── feature_type-fundamental/instrument-binance:SPOT_ASSET:BTC-USDT/
+│   │   ├── feature_type-fundamental/instrument-binance:SPOT_PAIR:BTC-USDT/
 │   │   │   ├── fundamental_features.parquet
 │   │   │   └── fundamental_signals.parquet
 │   │   ├── feature_type-options/instrument-deribit:Option:BTC-USD-50000-241225-C/
@@ -112,7 +112,7 @@ gs://your-bucket/ml_features/
 │   │   └── options_signals.parquet
 │   └── ...
 └── by_instrument_id/
-    ├── instrument-binance:SPOT_ASSET:BTC-USDT/year-2023/month-05/
+    ├── instrument-binance:SPOT_PAIR:BTC-USDT/year-2023/month-05/
     │   ├── btcusdt_all_features.parquet
     │   └── btcusdt_all_signals.parquet
     ├── instrument-deribit:Option:BTC-USD-50000-241225-C/year-2023/month-05/
@@ -430,7 +430,7 @@ if __name__ == "__main__":
     
     date = datetime(2023, 5, 23)
     venue = 'binance'
-    instrument_id = 'binance:SPOT_ASSET:BTC-USDT'
+    instrument_id = 'binance:SPOT_PAIR:BTC-USDT'
     data_type = 'trades'
     
     # Create partitions
@@ -462,7 +462,7 @@ if __name__ == "__main__":
     features = reader.read_ml_features(
         date, 
         feature_type='technical', 
-        instrument_id='binance:SPOT_ASSET:BTC-USDT'
+        instrument_id='binance:SPOT_PAIR:BTC-USDT'
     )
     print(f"Read {len(features)} ML feature records")
 ```
@@ -527,7 +527,7 @@ btc_trades = reader.read_raw_tick_data(
 # ✅ Fast: All BTC-related instruments across venues
 btc_spot = reader.read_raw_tick_data(
     date,
-    instrument_id='binance:SPOT_ASSET:BTC-USDT'
+    instrument_id='binance:SPOT_PAIR:BTC-USDT'
 )
 btc_perp = reader.read_raw_tick_data(
     date,

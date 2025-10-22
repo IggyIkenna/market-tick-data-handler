@@ -20,12 +20,12 @@ This document outlines the optimized single partition strategy that provides max
 └── 📁 by_date/
     └── 📁 day-2023-05-23/
         └── 📁 data_type-trades/
-            ├── 📄 BINANCE:SPOT_ASSET:BTC-USDT.parquet (2GB)
-            ├── 📄 BINANCE:SPOT_ASSET:ETH-USDT.parquet (1.5GB)
+            ├── 📄 BINANCE:SPOT_PAIR:BTC-USDT.parquet (2GB)
+            ├── 📄 BINANCE:SPOT_PAIR:ETH-USDT.parquet (1.5GB)
             └── 📄 DERIBIT:PERP:BTC-USDT.parquet (1.8GB)
         └── 📁 data_type-book_snapshot_5/
-            ├── 📄 BINANCE:SPOT_ASSET:BTC-USDT.parquet (500MB)
-            ├── 📄 BINANCE:SPOT_ASSET:ETH-USDT.parquet (400MB)
+            ├── 📄 BINANCE:SPOT_PAIR:BTC-USDT.parquet (500MB)
+            ├── 📄 BINANCE:SPOT_PAIR:ETH-USDT.parquet (400MB)
             └── 📄 DERIBIT:PERP:BTC-USDT.parquet (450MB)
 ```
 

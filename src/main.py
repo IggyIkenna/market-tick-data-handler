@@ -36,6 +36,7 @@ from config import get_config
 from src.instrument_processor.canonical_key_generator import CanonicalInstrumentKeyGenerator
 from src.instrument_processor.gcs_uploader import InstrumentGCSUploader
 from src.data_downloader.download_orchestrator import DownloadOrchestrator
+from src.data_validator.data_validator import DataValidator
 # MarketDataOrchestrator removed - using DownloadOrchestrator directly
 
 # Configure logging
@@ -287,6 +288,87 @@ class TickDataDownloadHandler(ModeHandler):
         
         return results
 
+class DataValidationHandler(ModeHandler):
+    """Handles data validation and missing data checking"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.data_validator = DataValidator(self.gcs_bucket)
+    
+    async def run(self, start_date: datetime, end_date: datetime,
+                  venues: List[str] = None, instrument_types: List[str] = None,
+                  data_types: List[str] = None, **kwargs):
+        """Validate data completeness and check for missing data"""
+        logger.info(f"🔍 Starting data validation from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        if data_types is None:
+            # Check for all available data types based on instrument definitions
+            data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'options_chain', 'liquidations']
+        
+        results = {
+            'total_days': 0,
+            'validation_status': 'unknown',
+            'missing_data_count': 0,
+            'coverage_percentage': 0.0,
+            'missing_data_details': [],
+            'summary': {}
+        }
+        
+        try:
+            # Generate comprehensive missing data report
+            report = self.data_validator.generate_missing_data_report(
+                start_date=start_date,
+                end_date=end_date,
+                venues=venues,
+                instrument_types=instrument_types,
+                data_types=data_types
+            )
+            
+            results['validation_status'] = report['status']
+            results['missing_data_count'] = report['missing_count']
+            results['coverage_percentage'] = report['coverage_percentage']
+            results['summary'] = report
+            
+            # Get detailed missing data if any
+            if data_types:
+                missing_df = self.data_validator.check_missing_data_by_type(
+                    start_date, end_date, venues, instrument_types, data_types
+                )
+            else:
+                missing_df = self.data_validator.check_missing_data(
+                    start_date, end_date, venues, instrument_types
+                )
+            
+            if not missing_df.empty:
+                results['missing_data_details'] = missing_df.to_dict('records')
+                
+                # Save missing data to CSV file
+                csv_filename = f"missing_data_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.csv"
+                csv_path = f"data/{csv_filename}"
+                missing_df.to_csv(csv_path, index=False)
+                logger.info(f"📄 Missing data saved to: {csv_path}")
+            
+            # Print summary
+            logger.info('🎉 DATA VALIDATION COMPLETED')
+            logger.info(f"📊 Status: {results['validation_status']}")
+            logger.info(f"📈 Coverage: {results['coverage_percentage']:.1f}%")
+            logger.info(f"❌ Missing entries: {results['missing_data_count']}")
+            
+            if results['missing_data_count'] > 0:
+                logger.warning(f"⚠️ Found {results['missing_data_count']} missing data entries")
+                logger.info("💡 Use --verbose flag to see detailed missing data list")
+                if not missing_df.empty:
+                    logger.info(f"📄 Detailed missing data saved to: data/{csv_filename}")
+            else:
+                logger.info("✅ All expected data is available")
+            
+        except Exception as e:
+            logger.error(f"❌ Data validation failed: {e}")
+            results['validation_status'] = 'failed'
+            results['error'] = str(e)
+        
+        return results
+
 class FullPipelineHandler(ModeHandler):
     """Handles the complete pipeline: instruments -> download -> validate"""
     
@@ -330,9 +412,16 @@ class FullPipelineHandler(ModeHandler):
             )
             results['data_download'] = download_results
             
-            # Step 3: Validate data (placeholder for now)
+            # Step 3: Validate data completeness
             logger.info("Step 3: Validating data completeness")
-            validation_results = {'status': 'completed', 'message': 'Validation not yet implemented'}
+            validation_handler = DataValidationHandler(self.config)
+            validation_results = await validation_handler.run(
+                start_date=start_date,
+                end_date=end_date,
+                venues=venues,
+                instrument_types=instrument_types,
+                data_types=data_types
+            )
             results['validation'] = validation_results
             
             logger.info('🎉 FULL PIPELINE COMPLETED')
@@ -425,9 +514,9 @@ Examples:
     # Mode selection
     parser.add_argument(
         '--mode', 
-        choices=['instruments', 'download', 'full-pipeline'],
+        choices=['instruments', 'download', 'validate', 'full-pipeline'],
         required=True,
-        help='Operation mode: instruments (generate definitions), download (tick data), full-pipeline (complete flow)'
+        help='Operation mode: instruments (generate definitions), download (tick data), validate (check missing data), full-pipeline (complete flow)'
     )
     
     # Date range
@@ -573,6 +662,15 @@ async def main():
                 instrument_types=args.instrument_types,
                 data_types=args.data_types,
                 max_instruments=args.max_instruments
+            )
+        elif args.mode == 'validate':
+            handler = DataValidationHandler(config)
+            result = await handler.run(
+                start_date=start_date,
+                end_date=end_date,
+                venues=args.venues,
+                instrument_types=args.instrument_types,
+                data_types=args.data_types
             )
         elif args.mode == 'full-pipeline':
             handler = FullPipelineHandler(config)

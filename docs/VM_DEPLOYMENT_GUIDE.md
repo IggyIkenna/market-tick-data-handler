@@ -1,26 +1,19 @@
 # Market Data Handler - VM Deployment Guide
 
 ## Overview
-This guide covers the successful deployment of market data download VMs and Cloud Run jobs, including all pitfalls encountered and their solutions.
+This guide covers VM deployment for the Market Tick Data Handler using the current deploy/vm/ script structure.
 
-## Current Status ✅
-- **40 VMs deployed and working** (processing 2020-2025 data)
-- **GCS uploads working** (with proper IAM permissions)
-- **Sharding working correctly** (1 VM per instrument)
-- **Cost optimized** (preemptible VMs, unused IPs cleaned up)
-
-## Architecture
-- **40 VMs**: Each processing 1 instrument (20 spot USDT + 20 perpetual USDT)
-- **Date Range**: 2020-01-01 to 2025-10-19 (5+ years of historical data)
-- **Timeframes**: 1m, 5m, 15m, 1h, 4h, 24h (25 timeframes per day)
-- **Storage**: GCS bucket `market-data-candles`
-- **Format**: Parquet files (converted from CSV)
+## Current Architecture
+- **Single VM Deployment**: For development and testing
+- **Multiple VM Deployment**: For production with sharding
+- **Data Storage**: GCS bucket with single partition strategy
+- **Entry Point**: `src/main.py` with three modes (instruments, download, full-pipeline)
 
 ## Key Files
-- `vm-startup-script-fixed.sh` - **WORKING** startup script
-- `orchestrate-market-data-download.sh` - Main orchestration script
-- `cleanup-market-data.sh` - Cleanup script
-- `setup-daily-scheduler.sh` - Cloud Scheduler setup
+- `deploy/vm/deploy-instruments.sh` - Single VM for instrument generation
+- `deploy/vm/deploy-tardis.sh` - Single VM for data download
+- `deploy/vm/shard-deploy.sh` - Multiple VMs with sharding
+- `deploy/vm/build-images.sh` - Docker image build and push
 
 ## Critical Pitfalls & Solutions
 
@@ -119,34 +112,38 @@ TOTAL_SHARDS="40"
 
 ## Usage
 
-### Deploy VMs
+### Single VM Deployment (Development/Testing)
 ```bash
-# Deploy all 40 VMs
-./orchestrate-market-data-download.sh
+# Deploy single VM for instrument generation
+./deploy/vm/deploy-instruments.sh deploy
 
-# Deploy specific range
-./orchestrate-market-data-download.sh --instances 20 --start-shard 0 --end-shard 19
+# Deploy single VM for data download
+./deploy/vm/deploy-tardis.sh deploy
 
-# Deploy with cleanup
-./orchestrate-market-data-download.sh --cleanup
+# Run operations on deployed VMs
+./deploy/vm/deploy-instruments.sh run --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/vm/deploy-tardis.sh run --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
 ```
 
-### Deploy Cloud Run Jobs
+### Multiple VM Deployment (Production)
 ```bash
-# Deploy 60 Cloud Run jobs for all instruments
-./orchestrate-market-data-download.sh --type cloudrun --instances 60
+# Deploy multiple VMs for instrument generation
+./deploy/vm/shard-deploy.sh instruments --start-date 2023-05-23 --end-date 2023-05-25 --shards 10
+
+# Deploy multiple VMs for data download
+./deploy/vm/shard-deploy.sh tardis --start-date 2023-05-23 --end-date 2023-05-25 --shards 20
+
+# Clean up all VMs
+./deploy/vm/shard-deploy.sh cleanup
 ```
 
-### Setup Daily Scheduler
+### Docker Image Management
 ```bash
-# Setup Cloud Scheduler for daily runs
-./setup-daily-scheduler.sh
-```
+# Build and push Docker images
+./deploy/vm/build-images.sh build-and-push --tag v1.0.0
 
-### Cleanup
-```bash
-# Clean up all resources
-./cleanup-market-data.sh
+# Clean up local images
+./deploy/vm/build-images.sh clean
 ```
 
 ## Monitoring
@@ -163,7 +160,11 @@ gcloud compute instances get-serial-port-output market-data-vm-0 --zone=asia-nor
 
 ### Check GCS Uploads
 ```bash
-gcloud storage ls gs://market-data-candles/data/2024-09-01/1m/binance-spot/BTC_USDT/
+# Check instrument definitions
+gsutil ls gs://market-data-tick/instrument_availability/by_date/day-2023-05-23/
+
+# Check tick data
+gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/data_type-trades/
 ```
 
 ## Cost Optimization
@@ -228,7 +229,7 @@ gcloud storage ls gs://market-data-candles/data/2024-09-01/1m/binance-spot/BTC_U
    start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=None)  # Naive UTC
    ```
 
-3. **Fixed in**: `scripts/cloud_run_downloader.py` lines 113-114
+3. **Fixed in**: `deploycloud_run_downloader.py` lines 113-114
 
 **Verification**:
 ```bash
@@ -264,9 +265,9 @@ gcloud storage cat gs://market-data-candles/data/2020-01-01/1m/binance-spot/BTC_
 
 **Files Updated with Timezone Fixes**:
 - `binance_connector.py` - Candle timestamp conversion
-- `scripts/cloud_run_downloader.py` - Date parsing
+- `deploycloud_run_downloader.py` - Date parsing
 - `market_data_query_service.py` - Date parsing
-- `scripts/download_and_aggregate.py` - Date parsing
+- `deploydownload_and_aggregate.py` - Date parsing
 - `market_data_service.py` - Date parsing
 - `gcs_manager.py` - Date parsing
 - `cli.py` - Date parsing

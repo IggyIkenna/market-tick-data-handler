@@ -13,56 +13,65 @@ python run_fixed_local_instrument_generation.py
 
 ### Local Docker Development
 ```bash
-# Build all images
-./scripts/local/build-all.sh
-
 # Run instrument generation
-./scripts/local/run-instrument-generation.sh
+./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
 
 # Run Tardis download
-./scripts/local/run-tardis-download.sh
+./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
+
+# Run validation
+./deploy/local/run-main.sh validate --start-date 2023-05-23 --end-date 2023-05-25
+
+# Run full pipeline
+./deploy/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### VM Deployment - Development/Testing
 ```bash
 # Deploy single VM for instrument generation
-./scripts/vm/deploy-instrument-generation.sh
+./deploy/vm/deploy-instruments.sh
 
 # Deploy single VM for Tardis download
-./scripts/vm/deploy-tardis-download.sh
+./deploy/vm/deploy-tardis.sh
 
-# Manage development VMs
-./scripts/vm/vm-manager.sh
+# Deploy multiple VMs with sharding
+./deploy/vm/shard-deploy.sh instruments --start-date 2023-05-23 --end-date 2023-05-25 --shards 5
 ```
 
 ### VM Deployment - Production Orchestration
 ```bash
-# Deploy 60+ VMs for massive data processing
-./deploy/orchestration/orchestrate-tick-download.sh \
-  --start-date 2023-05-01 \
-  --end-date 2023-07-31 \
-  --instances 60
+# Deploy multiple VMs for massive data processing
+./deploy/vm/shard-deploy.sh tardis --start-date 2023-05-01 --end-date 2023-07-31 --shards 60
 
-# Monitor production VMs
-./deploy/orchestration/monitor-tick-download.sh
+# Build and push Docker images
+./deploy/vm/build-images.sh build-and-push --tag v1.0.0
 
-# Clean up production VMs
-./deploy/orchestration/cleanup-tick-vms.sh
+# Clean up VMs
+./deploy/vm/shard-deploy.sh cleanup
 ```
 
 ## 📁 File Structure Overview
 
 ```
+src/
+├── main.py                  # Centralized entry point
+├── instrument_processor/    # Instrument definition generation
+├── data_downloader/         # Data download and upload
+└── data_validator/          # Data validation
+
+deploy/
+├── local/                   # Local execution scripts
+│   └── run-main.sh         # Single convenience script
+└── vm/                      # VM deployment scripts
+    ├── deploy-instruments.sh
+    ├── deploy-tardis.sh
+    ├── build-images.sh
+    └── shard-deploy.sh
+
 docker/
-├── instrument-generation/    # Docker for instrument generation
+├── instrument-generation/   # Docker for instrument generation
 ├── tardis-download/         # Docker for Tardis download
 └── shared/                  # Shared Docker utilities
-
-scripts/
-├── local/                   # Local Docker execution
-└── vm/                      # Single VM deployment (development/testing)
-
-deploy/                      # Production orchestration (60+ VMs)
 ```
 
 ## 🔧 Setup
@@ -78,20 +87,20 @@ deploy/                      # Production orchestration (60+ VMs)
    # Edit .env with your values
    ```
 
-3. **Build Images**
+3. **Run Operations**
    ```bash
-   ./scripts/local/build-all.sh
+   # Use the convenience script
+   ./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
    ```
 
 ## 📊 4 Deployment Modes
 
 | Mode | Purpose | Script | Scale | Docker |
 |------|---------|--------|-------|--------|
-| Local Python - Instrument | Run instrument generation locally (no Docker) | `python run_fixed_local_instrument_generation.py` | Local | None |
-| Local Docker - Instrument | Run instrument generation locally | `./scripts/local/run-instrument-generation.sh` | Local | `docker/instrument-generation/` |
-| Local Docker - Tardis | Run Tardis download locally | `./scripts/local/run-tardis-download.sh` | Local | `docker/tardis-download/` |
-| VM - Development | Deploy single VM for testing | `./scripts/vm/deploy-*.sh` | 1 VM | Local builds |
-| VM - Production | Deploy 60+ VMs for massive processing | `./deploy/orchestration/orchestrate-*.sh` | 60+ VMs | Artifact Registry |
+| Local Python | Run operations locally (no Docker) | `python -m src.main --mode <mode>` | Local | None |
+| Local Docker | Run operations in Docker locally | `./deploy/local/run-main.sh <mode>` | Local | `docker/` |
+| VM - Development | Deploy single VM for testing | `./deploy/vm/deploy-*.sh` | 1 VM | Local builds |
+| VM - Production | Deploy multiple VMs for massive processing | `./deploy/vm/shard-deploy.sh` | Multiple VMs | Artifact Registry |
 
 ## 🎯 When to Use Each Mode
 
@@ -108,13 +117,13 @@ deploy/                      # Production orchestration (60+ VMs)
 - ✅ Process small datasets
 - ✅ Quick iterations
 
-### **VM Development** (`scripts/vm/`)
+### **VM Development** (`deploy/vm/`)
 - ✅ Test VM deployment
 - ✅ Process 1-7 days of data
 - ✅ Validate before production
 - ✅ Single VM testing
 
-### **VM Production** (`deploy/orchestration/`)
+### **VM Production** (`deploy/vm/shard-deploy.sh`)
 - ✅ Process months/years of data
 - ✅ Production workloads
 - ✅ Maximum parallelism
@@ -144,6 +153,6 @@ sudo journalctl -u google-startup-scripts.service -f
 ## 🛠️ Troubleshooting
 
 - **Docker not running**: Start Docker Desktop
-- **Permission denied**: `chmod +x scripts/**/*.sh`
+- **Permission denied**: `chmod +x deploy**/*.sh`
 - **Missing .env**: `cp env.example .env`
 - **VM issues**: Check gcloud auth and project settings

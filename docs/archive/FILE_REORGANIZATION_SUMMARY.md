@@ -69,7 +69,7 @@ market-tick-data-handler/
 │   ├── instrument-generation/  # Instrument generation Docker setup
 │   ├── tardis-download/        # Tardis download Docker setup
 │   └── shared/                 # Shared Docker resources
-├── scripts/                    # Scripts and utilities
+├── deploy                    # Scripts and utilities
 ├── deploy/                     # Deployment scripts
 └── docs/                      # Documentation
 ```
@@ -116,7 +116,7 @@ The user experience remains exactly the same:
 
 ```bash
 # Main script (unchanged)
-./scripts/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+./deploylocal/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 
 # Docker builds (updated paths)
 ./deploy/docker-build.sh build

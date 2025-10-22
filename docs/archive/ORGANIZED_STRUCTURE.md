@@ -18,7 +18,7 @@ market-tick-data-handler/
 │   └── shared/                      # Shared Docker utilities
 │       ├── requirements.txt
 │       └── common.dockerignore
-├── scripts/                         # All deployment scripts
+├── deploy                         # All deployment scripts
 │   ├── local/                       # Local Docker execution
 │   │   ├── run-instrument-generation.sh
 │   │   ├── run-tardis-download.sh
@@ -42,19 +42,19 @@ market-tick-data-handler/
 
 ### 1. Local Docker - Instrument Generation
 **Purpose**: Run instrument generation locally in Docker
-**Script**: `./scripts/local/run-instrument-generation.sh`
+**Script**: `./deploylocal/run-instrument-generation.sh`
 **Docker**: `docker/instrument-generation/`
 
 ### 2. Local Docker - Tardis Download
 **Purpose**: Run Tardis data download locally in Docker
-**Script**: `./scripts/local/run-tardis-download.sh`
+**Script**: `./deploylocal/run-tardis-download.sh`
 **Docker**: `docker/tardis-download/`
 
 ### 3. VM Deployment - Development/Testing
 **Purpose**: Deploy single VM for development and testing
 **Scripts**: 
-- `./scripts/vm/deploy-instrument-generation.sh` (single VM)
-- `./scripts/vm/deploy-tardis-download.sh` (single VM)
+- `./deployvm/deploy-instrument-generation.sh` (single VM)
+- `./deployvm/deploy-tardis-download.sh` (single VM)
 **Docker**: Uses local Docker images
 **Scale**: 1 VM at a time
 
@@ -78,34 +78,34 @@ market-tick-data-handler/
 
 #### Build All Images
 ```bash
-./scripts/local/build-all.sh
+./deploylocal/build-all.sh
 ```
 
 #### Run Instrument Generation Locally
 ```bash
-./scripts/local/run-instrument-generation.sh
+./deploylocal/run-instrument-generation.sh
 ```
 
 #### Run Tardis Download Locally
 ```bash
-./scripts/local/run-tardis-download.sh
+./deploylocal/run-tardis-download.sh
 ```
 
 ### VM Deployment - Development/Testing
 
 #### Deploy Single VM for Instrument Generation
 ```bash
-./scripts/vm/deploy-instrument-generation.sh
+./deployvm/deploy-instrument-generation.sh
 ```
 
 #### Deploy Single VM for Tardis Download
 ```bash
-./scripts/vm/deploy-tardis-download.sh
+./deployvm/deploy-tardis-download.sh
 ```
 
 #### Manage Development VMs
 ```bash
-./scripts/vm/vm-manager.sh
+./deployvm/vm-manager.sh
 ```
 
 ### VM Deployment - Production Orchestration
@@ -131,13 +131,13 @@ market-tick-data-handler/
 
 ## 📋 Script Descriptions
 
-### Local Scripts (`scripts/local/`)
+### Local Scripts (`deploylocal/`)
 
 - **`build-all.sh`**: Builds all Docker images for local development
 - **`run-instrument-generation.sh`**: Runs instrument generation in Docker locally
 - **`run-tardis-download.sh`**: Runs Tardis data download in Docker locally
 
-### VM Scripts - Development (`scripts/vm/`)
+### VM Scripts - Development (`deployvm/`)
 
 - **`deploy-instrument-generation.sh`**: Creates single VM for instrument generation testing
 - **`deploy-tardis-download.sh`**: Creates single VM for Tardis download testing
@@ -169,7 +169,7 @@ market-tick-data-handler/
 
 ## 🎯 **Key Distinction: Development vs Production VM Deployment**
 
-### **Development VMs (`scripts/vm/`)**
+### **Development VMs (`deployvm/`)**
 - **Scale**: 1 VM at a time
 - **Purpose**: Testing, development, small-scale processing
 - **Docker Source**: Local builds
@@ -191,10 +191,10 @@ market-tick-data-handler/
 
 | **Scenario** | **Use** | **Why** |
 |--------------|---------|---------|
-| Testing new features | `scripts/vm/` | Single VM, easy to debug |
-| Processing 1 day of data | `scripts/vm/` | Small scale, cost-effective |
+| Testing new features | `deployvm/` | Single VM, easy to debug |
+| Processing 1 day of data | `deployvm/` | Small scale, cost-effective |
 | Processing 3 months of data | `deploy/orchestration/` | Massive parallelism needed |
-| Learning the system | `scripts/vm/` | Simple, controlled environment |
+| Learning the system | `deployvm/` | Simple, controlled environment |
 | Production workload | `deploy/orchestration/` | Battle-tested, optimized |
 
 ## 🔧 Environment Configuration
@@ -267,7 +267,7 @@ tail -f /opt/market-tick-data-handler/logs/*.log
    - Update with actual values
 
 3. **Permission denied**
-   - Make scripts executable: `chmod +x scripts/**/*.sh`
+   - Make scripts executable: `chmod +x deploy**/*.sh`
 
 4. **VM deployment fails**
    - Check gcloud authentication: `gcloud auth list`
@@ -316,7 +316,7 @@ gcloud compute instances get-serial-port-output VM_NAME --zone=ZONE
 When adding new deployment modes:
 
 1. Create new directory under `docker/` for Docker files
-2. Create new scripts under `scripts/local/` or `scripts/vm/`
+2. Create new scripts under `deploylocal/` or `deployvm/`
 3. Update this documentation
 4. Test all deployment modes
 5. Update environment templates if needed

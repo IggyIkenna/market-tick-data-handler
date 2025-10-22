@@ -68,9 +68,9 @@ logs/
 
 # Archive and old files
 archive/
-deprecated_scripts/
-non_critical_scripts/
-orphaned_instrument_scripts/
+deprecated_deploy
+non_critical_deploy
+orphaned_instrument_deploy
 
 # Documentation
 docs/

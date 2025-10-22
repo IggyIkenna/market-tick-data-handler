@@ -26,25 +26,94 @@ cp env.example .env
 
 ### Quick Test
 ```bash
-# Test Tardis connection
-python scripts/test_tardis_simple.py
+# Test with instrument generation
+python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-23
 
-# Download sample data
-python scripts/download_oct20_btcusdt.py
+# Test with data download
+python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues deribit --max-instruments 5
 ```
 
-## 🎯 Running Instrument Generation Locally
+## 🎯 Core Operations
 
-The instrument generation process can be run in multiple ways depending on your needs:
+The system provides three main operations through a centralized entry point:
 
-### Prerequisites
-- **Python 3.11+** (for local execution)
-- **Docker Desktop** (for Docker execution)
-- **Google Cloud SDK** (for GCS uploads)
-- **Tardis.dev API key** (in `.env` file)
-- **GCP Service Account Key** (`central-element-323112-e35fb0ddafe2.json`)
+### 1. Instrument Generation
+Generate canonical instrument definitions and upload to GCS:
+```bash
+python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
+```
 
-### Setup
+### 2. Data Download
+Download tick data from Tardis and upload to GCS:
+```bash
+python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
+```
+
+### 3. Data Validation
+Validate data completeness and check for missing data:
+```bash
+python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
+```
+
+### 4. Full Pipeline
+Run complete workflow (instruments → download → validate):
+```bash
+python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+```
+
+## 🚀 Deployment Options
+
+### Local Development
+```bash
+# Use convenience script
+./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh validate --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+```
+
+### VM Deployment
+```bash
+# Single VM for development/testing
+./deploy/vm/deploy-instruments.sh deploy
+./deploy/vm/deploy-tardis.sh deploy
+
+# Multiple VMs for production
+./deploy/vm/shard-deploy.sh instruments --start-date 2023-05-23 --end-date 2023-05-25 --shards 10
+./deploy/vm/shard-deploy.sh tardis --start-date 2023-05-23 --end-date 2023-05-25 --shards 20
+```
+
+## 📊 Data Organization
+
+The system uses a single partition strategy for optimal performance:
+
+```
+gs://market-data-tick/
+├── instrument_availability/
+│   └── by_date/
+│       └── day-{date}/
+│           └── instruments.parquet
+└── raw_tick_data/
+    └── by_date/
+        └── day-{date}/
+            ├── data_type-trades/
+            │   └── {instrument_key}.parquet
+            └── data_type-book_snapshot_5/
+                └── {instrument_key}.parquet
+```
+
+## 📚 Documentation
+
+- [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md) - Current system architecture
+- [Main Usage](docs/MAIN_USAGE.md) - Detailed usage instructions
+- [Quick Reference](docs/QUICK_REFERENCE.md) - Quick commands and structure
+- [Setup Guide](docs/SETUP_GUIDE.md) - Complete setup instructions
+- [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) - VM deployment instructions
+- [Instrument Key Specification](docs/INSTRUMENT_KEY.md) - Canonical instrument key format
+
+## 🔧 Configuration
+
+Create a `.env` file with your configuration:
 ```bash
 # Copy environment template
 cp env.example .env
@@ -75,10 +144,10 @@ python run_fixed_local_instrument_generation.py
 
 ```bash
 # Build Docker image (first time only)
-./scripts/local/build-all.sh
+./deploylocal/build-all.sh
 
 # Run instrument generation in Docker
-./scripts/local/run-instrument-generation.sh
+./deploylocal/run-instrument-generation.sh
 ```
 
 **Features**:
@@ -128,7 +197,7 @@ All methods produce **identical results**:
 | **Days Processed** | 3 (2023-05-23 to 2023-05-25) |
 | **Total Instruments** | ~4,066 |
 | **Exchanges** | Deribit |
-| **Instrument Types** | SPOT_ASSET, FUTURE, OPTION |
+| **Instrument Types** | SPOT_PAIR, FUTURE, OPTION |
 | **GCS Partitions** | 6 per day (by_date, by_venue, by_type, aggregated) |
 | **Errors** | 0 |
 
@@ -197,7 +266,7 @@ gsutil cp gs://market-data-tick/instrument_availability/instruments_20230523.par
 
 3. **Permission denied**
    ```bash
-   chmod +x scripts/local/*.sh
+   chmod +x deploylocal/*.sh
    ```
 
 4. **Missing GCP credentials**
@@ -212,7 +281,7 @@ gsutil cp gs://market-data-tick/instrument_availability/instruments_20230523.par
    docker system prune -a
    
    # Rebuild
-   ./scripts/local/build-all.sh
+   ./deploylocal/build-all.sh
    ```
 
 #### Debug Commands
@@ -242,7 +311,7 @@ market-tick-data-handler/
 │   ├── test_timestamp_consistency.py
 │   ├── test_timestamp_validation.py
 │   └── README.md
-├── 📁 scripts/                  # Utility and test scripts
+├── 📁 deploy                  # Utility and test scripts
 │   ├── vm_data_downloader.py   # Main VM download script
 │   ├── test_*.py               # Various test scripts
 │   └── download_*.py           # Sample download scripts
@@ -335,12 +404,12 @@ gs://market-data-tick/
     └── by_date/
         └── day-2023-05-23/
             ├── data_type-trades/
-            │   ├── BINANCE:SPOT_ASSET:BTC-USDT.parquet (2GB)
-            │   ├── BINANCE:SPOT_ASSET:ETH-USDT.parquet (1.5GB)
+            │   ├── BINANCE:SPOT_PAIR:BTC-USDT.parquet (2GB)
+            │   ├── BINANCE:SPOT_PAIR:ETH-USDT.parquet (1.5GB)
             │   └── DERIBIT:PERP:BTC-USDT.parquet (1.8GB)
             └── data_type-book_snapshot_5/
-                ├── BINANCE:SPOT_ASSET:BTC-USDT.parquet (500MB)
-                ├── BINANCE:SPOT_ASSET:ETH-USDT.parquet (400MB)
+                ├── BINANCE:SPOT_PAIR:BTC-USDT.parquet (500MB)
+                ├── BINANCE:SPOT_PAIR:ETH-USDT.parquet (400MB)
                 └── DERIBIT:PERP:BTC-USDT.parquet (450MB)
 ```
 
@@ -350,7 +419,7 @@ gs://market-data-tick/
 gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/
 
 # Download specific instrument trades
-gsutil cp gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/data_type-trades/BINANCE:SPOT_ASSET:BTC-USDT.parquet ./
+gsutil cp gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/data_type-trades/BINANCE:SPOT_PAIR:BTC-USDT.parquet ./
 
 # Download all trades for a date
 gsutil -m cp -r gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/data_type-trades/ ./
@@ -369,7 +438,7 @@ client = storage.Client()
 bucket = client.bucket('market-data-tick')
 
 # Get BTC-USDT trades for 2023-05-23
-blob = bucket.blob('raw_tick_data/by_date/day-2023-05-23/data_type-trades/BINANCE:SPOT_ASSET:BTC-USDT.parquet')
+blob = bucket.blob('raw_tick_data/by_date/day-2023-05-23/data_type-trades/BINANCE:SPOT_PAIR:BTC-USDT.parquet')
 blob.download_to_filename('btc_trades.parquet')
 df = pd.read_parquet('btc_trades.parquet')
 
@@ -396,13 +465,13 @@ pytest --cov=. test/
 ### Test Scripts
 ```bash
 # Test Tardis connection
-python scripts/test_tardis_simple.py
+python deploytest_tardis_simple.py
 
 # Test data download
-python scripts/test_basic.py
+python deploytest_basic.py
 
 # Test comprehensive pipeline
-python scripts/test_comprehensive.py
+python deploytest_comprehensive.py
 ```
 
 ## 📚 Documentation

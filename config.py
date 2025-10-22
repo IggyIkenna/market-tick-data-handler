@@ -20,7 +20,8 @@ class TardisConfig:
     base_url: str = "https://datasets.tardis.dev"
     timeout: int = 30
     max_retries: int = 3
-    max_concurrent: int = 2
+    max_concurrent: int = 50
+    max_parallel_uploads: int = 20
     rate_limit_per_vm: int = 1000000  # 1M calls per day per VM
     
     def __post_init__(self):

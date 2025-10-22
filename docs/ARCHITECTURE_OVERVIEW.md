@@ -1,4 +1,4 @@
-# Market Data Tick Handler - New Architecture Overview
+# Market Data Tick Handler - Architecture Overview
 
 ## Problem Solved
 
@@ -6,15 +6,19 @@
 
 **After**: Centralized `src/main.py` entry point with environment-based configuration and clean argument parsing.
 
-## New Architecture
+## Current Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    src/main.py (Entry Point)                   │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
 │  │  Mode Handler   │ │  Mode Handler   │ │  Mode Handler   │   │
-│  │  Instruments    │ │  Download       │ │  Full Pipeline  │   │
+│  │  Instruments    │ │  Download       │ │  Validation     │   │
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘   │
+│  ┌─────────────────┐                                           │
+│  │  Mode Handler   │                                           │
+│  │  Full Pipeline  │                                           │
+│  └─────────────────┘                                           │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -30,9 +34,13 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Core Components                              │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐   │
-│  │  Canonical Key  │ │  Download       │ │  GCS Uploader   │   │
+│  │  Canonical Key  │ │  Download       │ │  Data Validator │   │
 │  │  Generator      │ │  Orchestrator   │ │                 │   │
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘   │
+│  ┌─────────────────┐                                           │
+│  │  GCS Uploader   │                                           │
+│  │  (Single Part.) │                                           │
+│  └─────────────────┘                                           │
 └─────────────────────────────────────────────────────────────────┘
                                 │
                                 ▼
@@ -60,7 +68,8 @@
 ### 3. Clean Mode Separation
 - **Instruments Mode**: Generate and upload instrument definitions
 - **Download Mode**: Download and upload tick data
-- **Full Pipeline Mode**: Complete workflow
+- **Validation Mode**: Validate data completeness and check for missing data
+- **Full Pipeline Mode**: Complete workflow (instruments → download → validate)
 
 ### 4. Docker-Friendly
 - **Updated Dockerfiles**: Use main.py entry point
@@ -77,6 +86,9 @@ python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05
 # Download tick data
 python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
 
+# Validate data
+python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
+
 # Full pipeline
 python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 ```
@@ -90,6 +102,10 @@ docker run --env-file .env market-tick-handler \
 # Tick data download
 docker run --env-file .env market-tick-handler \
   python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25
+
+# Data validation
+docker run --env-file .env market-tick-handler \
+  python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### VM Deployment
@@ -101,6 +117,9 @@ export INSTRUMENT_START_DATE="2023-05-23"
 export INSTRUMENT_END_DATE="2023-05-25"
 
 python -m src.main --mode instruments
+
+# Or run validation
+python -m src.main --mode validate
 ```
 
 ## File Structure
@@ -113,9 +132,19 @@ src/
 │   └── gcs_uploader.py
 ├── data_downloader/
 │   ├── download_orchestrator.py
+│   ├── instrument_reader.py
 │   └── tardis_connector.py
-└── orchestrator/
-    └── market_data_orchestrator.py
+└── data_validator/
+    └── data_validator.py      # 🆕 Data validation functionality
+
+deploy/
+├── local/
+│   └── run-main.sh           # 🆕 Single convenience script for all operations
+└── vm/
+    ├── deploy-instruments.sh
+    ├── deploy-tardis.sh
+    ├── build-images.sh
+    └── shard-deploy.sh
 
 docker/
 ├── instrument-generation/
@@ -124,10 +153,6 @@ docker/
 └── tardis-download/
     ├── Dockerfile            # 🔄 Updated to use main.py
     └── docker-compose.yml    # 🔄 Enhanced with env vars
-
-scripts/
-└── local/
-    └── run-main.sh           # 🆕 Single convenience script for all operations
 
 env.example                   # 🔄 Enhanced with comprehensive options
 MAIN_USAGE.md                 # 🆕 Complete usage documentation
@@ -140,7 +165,7 @@ ARCHITECTURE_OVERVIEW.md      # 🆕 This file
 ```bash
 # OLD WAY
 python run_fixed_local_instrument_generation.py
-python scripts/vm_data_downloader.py
+python deployvm_data_downloader.py
 
 # NEW WAY
 python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25

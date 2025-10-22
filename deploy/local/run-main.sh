@@ -39,12 +39,14 @@ show_usage() {
     echo "Modes:"
     echo "  instruments  - Generate instrument definitions and upload to GCS"
     echo "  download     - Download tick data and upload to GCS"
+    echo "  validate     - Check for missing data and validate completeness"
     echo "  full-pipeline - Run complete pipeline (instruments + download + validate)"
     echo ""
     echo "Examples:"
     echo "  $0 instruments --start-date 2023-05-23 --end-date 2023-05-25"
     echo "  $0 instruments --start-date 2023-05-23 --end-date 2023-05-25 --max-workers 8"
     echo "  $0 download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit"
+    echo "  $0 validate --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit --data-types trades book_snapshot_5"
     echo "  $0 full-pipeline --start-date 2023-05-23 --end-date 2023-05-25"
     echo ""
     echo "Performance Tips:"
@@ -65,7 +67,7 @@ shift  # Remove mode from arguments
 
 # Validate mode
 case $MODE in
-    instruments|download|full-pipeline)
+    instruments|download|validate|full-pipeline)
         echo -e "${GREEN}✅ Mode: $MODE${NC}"
         ;;
     *)
@@ -105,6 +107,9 @@ if [ $? -eq 0 ]; then
     echo "  - Temp: ./temp/"
     if [ "$MODE" = "download" ] || [ "$MODE" = "full-pipeline" ]; then
         echo "  - Downloads: ./downloads/"
+    fi
+    if [ "$MODE" = "validate" ] || [ "$MODE" = "full-pipeline" ]; then
+        echo "  - Validation reports: Check console output for missing data details"
     fi
     echo ""
     echo -e "${YELLOW}💡 Tip: Check the logs directory for detailed execution logs${NC}"

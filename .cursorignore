@@ -50,11 +50,11 @@ frontend/node_modules/
 # configs/
 
 # Scripts subdirectories (utility scripts, not core application code)
-# scripts/analyzers/
-# scripts/downloaders/
-# scripts/orchestrators/
-# scripts/processors/
-# scripts/utilities/
+# deployanalyzers/
+# deploydownloaders/
+# deployorchestrators/
+# deployprocessors/
+# deployutilities/
 
 # Environment files (sensitive will remove later)
 #.env

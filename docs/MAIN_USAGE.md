@@ -7,6 +7,7 @@ This document explains how to use the new centralized `src/main.py` entry point 
 The new `src/main.py` provides a unified interface for:
 - **Instrument Generation**: Generate canonical instrument definitions and upload to GCS
 - **Tick Data Download**: Download market data from Tardis and upload to GCS
+- **Data Validation**: Validate data completeness and check for missing data
 - **Full Pipeline**: Run the complete workflow (instruments → download → validate)
 
 ## Quick Start
@@ -36,6 +37,9 @@ python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05
 # Download tick data
 python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
 
+# Validate data
+python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
+
 # Run full pipeline
 python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 ```
@@ -54,11 +58,12 @@ python -m src.main --mode <MODE> --start-date <DATE> --end-date <DATE> [OPTIONS]
 |------|-------------|
 | `instruments` | Generate instrument definitions and upload to GCS |
 | `download` | Download tick data and upload to GCS |
+| `validate` | Validate data completeness and check for missing data |
 | `full-pipeline` | Run complete pipeline (instruments + download + validate) |
 
 ### Required Arguments
 
-- `--mode`: Operation mode (instruments, download, full-pipeline)
+- `--mode`: Operation mode (instruments, download, validate, full-pipeline)
 - `--start-date`: Start date in YYYY-MM-DD format
 - `--end-date`: End date in YYYY-MM-DD format
 
@@ -117,6 +122,20 @@ python -m src.main --mode download \
   --venues deribit \
   --instrument-types option perpetual \
   --max-instruments 5
+```
+
+### Data Validation
+
+```bash
+# Basic validation
+python -m src.main --mode validate \
+  --start-date 2023-05-23 --end-date 2023-05-25
+
+# Validate specific venues and data types
+python -m src.main --mode validate \
+  --start-date 2023-05-23 --end-date 2023-05-25 \
+  --venues deribit binance-futures \
+  --data-types trades book_snapshot_5
 ```
 
 ### Full Pipeline
@@ -204,9 +223,10 @@ docker run --env-file .env \
 
 ```bash
 # Use the convenience script
-./scripts/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
-./scripts/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
-./scripts/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh validate --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### Docker Execution
@@ -224,14 +244,14 @@ cd docker/tardis-download && docker-compose up --build
 ```
 data/
 ├── instrument_availability/          # Instrument definitions
-│   ├── by_date/                     # Partitioned by date
-│   ├── by_venue/                    # Partitioned by venue
-│   ├── by_type/                     # Partitioned by type
-│   └── aggregate/                   # Aggregated files
+│   └── by_date/                     # Single partition by date
+│       └── day-{date}/              # Daily partitions
+│           └── instruments.parquet  # Daily instrument definitions
 └── raw_tick_data/                   # Tick data
-    ├── by_date/                     # Partitioned by date
-    ├── by_venue/                    # Partitioned by venue
-    └── by_type/                     # Partitioned by type
+    └── by_date/                     # Single partition by date
+        └── day-{date}/              # Daily partitions
+            └── data_type-{type}/    # Data type subdirectories
+                └── {instrument_key}.parquet  # Individual instrument files
 
 logs/                                # Execution logs
 temp/                                # Temporary files
@@ -278,7 +298,7 @@ python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05
 python run_fixed_local_instrument_generation.py
 
 # Tick data download
-python scripts/vm_data_downloader.py
+python deployvm_data_downloader.py
 ```
 
 ### After (New Way)

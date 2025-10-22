@@ -37,7 +37,7 @@ market-tick-data-handler/
 │   │   └── data_validator.py
 │   └── orchestrator/              # Function 5: Orchestration
 │       └── market_data_orchestrator.py
-├── scripts/                       # Utility scripts
+├── deploy                       # Utility scripts
 ├── deploy/                        # Deployment configurations
 ├── docs/                          # Documentation
 ├── archive/                       # Deprecated files
@@ -142,7 +142,7 @@ python main.py
 
 ## 🧹 Cleanup
 
-Deprecated scripts have been moved to `archive/deprecated_scripts/`:
+Deprecated scripts have been moved to `archive/deprecated_deploy`:
 - Debug scripts
 - Test scripts  
 - Optimization demos

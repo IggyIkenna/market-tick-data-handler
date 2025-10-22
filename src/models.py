@@ -14,13 +14,10 @@ from decimal import Decimal
 class Venue(str, Enum):
     """Supported venues for instruments"""
     BINANCE = "binance"
-    BINANCE_SPOT = "binance-spot"
     BINANCE_FUTURES = "binance-futures"
     BYBIT = "bybit"
     OKX = "okx"
     DERIBIT = "deribit"
-    COINBASE = "coinbase"
-    KRAKEN = "kraken"
     AAVE_V3 = "aave_v3"
     ETHERFI = "etherfi"
     LIDO = "lido"
@@ -30,16 +27,16 @@ class Venue(str, Enum):
 
 class InstrumentType(str, Enum):
     """Supported instrument types"""
-    BASE_TOKEN = "BaseToken"
-    SPOT_PAIR = "SPOT_ASSET"
-    PERP = "Perp"
-    FUTURE = "Future"
-    OPTION = "Option"
-    EQUITY = "Equity"
-    INDEX = "Index"
+    SPOT_ASSET = "SPOT_ASSET"
+    SPOT_PAIR = "SPOT_PAIR"
+    PERPETUAL = "PERPETUAL"
+    FUTURE = "FUTURE"
+    OPTION = "OPTION"
+    EQUITY = "EQUITY"
+    INDEX = "INDEX"
     LST = "LST"
-    A_TOKEN = "aToken"
-    DEBT_TOKEN = "debtToken"
+    A_TOKEN = "A_TOKEN"
+    DEBT_TOKEN = "DEBT_TOKEN"
 
 @dataclass
 class InstrumentKey:
