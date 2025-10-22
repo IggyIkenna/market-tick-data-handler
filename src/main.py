@@ -588,9 +588,9 @@ Examples:
     # Mode selection
     parser.add_argument(
         '--mode', 
-        choices=['instruments', 'download', 'download-missing', 'validate', 'full-pipeline'],
+        choices=['instruments', 'missing-reports', 'download', 'validate', 'full-pipeline'],
         required=True,
-        help='Operation mode: instruments (generate definitions), download (tick data), download-missing (download only missing data), validate (check missing data), full-pipeline (complete flow)'
+        help='Operation mode: instruments (generate definitions), missing-reports (generate missing data reports), download (download only missing data), validate (check missing data), full-pipeline (complete flow)'
     )
     
     # Date range
@@ -740,18 +740,7 @@ async def main():
                 max_workers=args.max_workers
             )
         elif args.mode == 'download':
-            handler = TickDataDownloadHandler(config)
-            result = await handler.run(
-                start_date=start_date,
-                end_date=end_date,
-                venues=args.venues,
-                instrument_types=args.instrument_types,
-                data_types=args.data_types,
-                max_instruments=args.max_instruments,
-                shard_index=args.shard_index,
-                total_shards=args.total_shards
-            )
-        elif args.mode == 'download-missing':
+            # Standard download mode now uses missing data by default
             handler = MissingDataDownloadHandler(config)
             result = await handler.run(
                 start_date=start_date,

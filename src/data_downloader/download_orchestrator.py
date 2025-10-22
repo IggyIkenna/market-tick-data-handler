@@ -223,7 +223,7 @@ class DownloadOrchestrator:
     
     def _convert_missing_data_to_targets(self, missing_df: pd.DataFrame, venues: list = None, 
                                        instrument_types: list = None, data_types: list = None) -> List[Dict]:
-        """Convert missing data DataFrame to download targets"""
+        """Convert missing data DataFrame to download targets using instrument definitions"""
         targets = []
         
         # Filter by venues if specified
@@ -238,28 +238,44 @@ class DownloadOrchestrator:
         if data_types and 'data_type' in missing_df.columns:
             missing_df = missing_df[missing_df['data_type'].isin(data_types)]
         
-        # Convert to download targets
-        for _, row in missing_df.iterrows():
-            instrument_key = row['instrument_key']
+        # Get instrument definitions to get the correct tardis_exchange and tardis_symbol
+        from src.data_downloader.instrument_reader import InstrumentReader
+        instrument_reader = InstrumentReader(self.gcs_bucket)
+        
+        # Get unique instrument keys from missing data
+        unique_instrument_keys = missing_df['instrument_key'].unique()
+        
+        # Load instrument definitions for the date (we'll use the first missing data date)
+        if not missing_df.empty and 'date' in missing_df.columns:
+            # Get the date from the missing data
+            date_str = missing_df['date'].iloc[0]
+            date = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
             
-            # Parse instrument key to get exchange and symbol
-            # Format: EXCHANGE-TYPE:INSTRUMENT_TYPE:SYMBOL
-            parts = instrument_key.split(':')
-            if len(parts) >= 3:
-                exchange_part = parts[0]  # e.g., "OKX-SWAP"
-                instrument_type = parts[1]  # e.g., "PERP"
-                symbol = parts[2]  # e.g., "FIL-USDT"
+            # Load instrument definitions
+            instruments_df = instrument_reader.get_instruments_for_date(date)
+            
+            if not instruments_df.empty:
+                # Create a mapping from instrument_key to tardis_exchange and tardis_symbol
+                instrument_mapping = instruments_df.set_index('instrument_key')[['tardis_exchange', 'tardis_symbol']].to_dict('index')
                 
-                # Convert exchange format (OKX-SWAP -> okx-swap)
-                tardis_exchange = exchange_part.lower()
-                tardis_symbol = symbol
-                
-                targets.append({
-                    'instrument_key': instrument_key,
-                    'tardis_exchange': tardis_exchange,
-                    'tardis_symbol': tardis_symbol,
-                    'data_type': row.get('data_type', 'trades')  # Default to trades if not specified
-                })
+                # Convert to download targets using the instrument definitions
+                for _, row in missing_df.iterrows():
+                    instrument_key = row['instrument_key']
+                    
+                    if instrument_key in instrument_mapping:
+                        mapping = instrument_mapping[instrument_key]
+                        targets.append({
+                            'instrument_key': instrument_key,
+                            'tardis_exchange': mapping['tardis_exchange'],
+                            'tardis_symbol': mapping['tardis_symbol'],
+                            'data_type': row.get('data_type', 'trades')
+                        })
+                    else:
+                        logger.warning(f"Could not find instrument definition for {instrument_key}")
+            else:
+                logger.error("Could not load instrument definitions")
+        else:
+            logger.error("No date information in missing data DataFrame")
         
         return targets
     

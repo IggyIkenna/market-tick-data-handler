@@ -38,16 +38,16 @@ show_usage() {
     echo ""
         echo "Modes:"
         echo "  instruments     - Generate instrument definitions and upload to GCS"
-        echo "  download        - Download tick data and upload to GCS"
-        echo "  download-missing - Download only missing data based on missing data reports"
+        echo "  missing-reports - Generate missing data reports for date range and upload to GCS"
+        echo "  download        - Download only missing data (requires instrument definitions and missing data reports in GCS)"
         echo "  validate        - Check for missing data and validate completeness"
-        echo "  full-pipeline   - Run complete pipeline (instruments + download + validate)"
+        echo "  full-pipeline   - Run complete pipeline (instruments + missing-reports + download + validate)"
     echo ""
     echo "Examples:"
     echo "  $0 instruments --start-date 2023-05-23 --end-date 2023-05-25"
     echo "  $0 instruments --start-date 2023-05-23 --end-date 2023-05-25 --max-workers 8"
+    echo "  $0 missing-reports --start-date 2023-05-23 --end-date 2023-05-25"
     echo "  $0 download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit"
-    echo "  $0 download-missing --start-date 2023-05-23 --end-date 2023-05-25"
     echo "  $0 validate --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit --data-types trades book_snapshot_5"
     echo "  $0 full-pipeline --start-date 2023-05-23 --end-date 2023-05-25"
     echo ""
@@ -69,7 +69,7 @@ shift  # Remove mode from arguments
 
 # Validate mode
     case $MODE in
-        instruments|download|download-missing|validate|full-pipeline)
+        instruments|missing-reports|download|validate|full-pipeline)
             echo -e "${GREEN}✅ Mode: $MODE${NC}"
             ;;
     *)
@@ -92,11 +92,59 @@ if ! python3 -c "import pandas, google.cloud, requests" > /dev/null 2>&1; then
     pip3 install -r requirements.txt
 fi
 
-# Run the main.py with the specified mode and arguments
+# Run the appropriate script based on mode
 echo -e "${YELLOW}🏃 Running: python -m src.main --mode $MODE $@${NC}"
 echo ""
 
-python3 -m src.main --mode "$MODE" "$@"
+# Handle special modes that use different scripts
+case $MODE in
+    missing-reports)
+        echo -e "${YELLOW}📊 Running missing data report generation...${NC}"
+        python3 run_missing_data_report.py "$@"
+        ;;
+    full-pipeline)
+        echo -e "${YELLOW}🔄 Running full pipeline: instruments + missing-reports + download + validate${NC}"
+        echo ""
+        
+        # Step 1: Generate instruments
+        echo -e "${BLUE}Step 1: Generating instrument definitions...${NC}"
+        python3 -m src.main --mode instruments "$@"
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ Instrument generation failed${NC}"
+            exit 1
+        fi
+        
+        # Step 2: Generate missing data reports
+        echo -e "${BLUE}Step 2: Generating missing data reports...${NC}"
+        python3 run_missing_data_report.py "$@"
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ Missing data report generation failed${NC}"
+            exit 1
+        fi
+        
+        # Step 3: Download missing data
+        echo -e "${BLUE}Step 3: Downloading missing data...${NC}"
+        python3 -m src.main --mode download "$@"
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ Download failed${NC}"
+            exit 1
+        fi
+        
+        # Step 4: Validate
+        echo -e "${BLUE}Step 4: Validating data completeness...${NC}"
+        python3 -m src.main --mode validate "$@"
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}❌ Validation failed${NC}"
+            exit 1
+        fi
+        
+        echo -e "${GREEN}🎉 Full pipeline completed successfully!${NC}"
+        ;;
+    *)
+        # Default: use src.main for all other modes
+        python3 -m src.main --mode "$MODE" "$@"
+        ;;
+esac
 
 # Check exit status
 if [ $? -eq 0 ]; then
