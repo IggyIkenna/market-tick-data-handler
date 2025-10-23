@@ -41,6 +41,7 @@ show_usage() {
         echo "  missing-reports - Generate missing data reports for date range and upload to GCS"
         echo "  download        - Download only missing data (requires instrument definitions and missing data reports in GCS)"
         echo "  validate        - Check for missing data and validate completeness"
+        echo "  check-gaps      - Check for file existence gaps in date range (simple file checker)"
         echo "  full-pipeline   - Run complete pipeline (instruments + missing-reports + download + validate)"
     echo ""
     echo "Examples:"
@@ -49,6 +50,7 @@ show_usage() {
     echo "  $0 missing-reports --start-date 2023-05-23 --end-date 2023-05-25"
     echo "  $0 download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit"
     echo "  $0 validate --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit --data-types trades book_snapshot_5"
+    echo "  $0 check-gaps --start-date 2023-05-23 --end-date 2023-05-25"
     echo "  $0 full-pipeline --start-date 2023-05-23 --end-date 2023-05-25"
     echo ""
     echo "Performance Tips:"
@@ -68,10 +70,10 @@ MODE=$1
 shift  # Remove mode from arguments
 
 # Validate mode
-    case $MODE in
-        instruments|missing-reports|download|validate|full-pipeline)
-            echo -e "${GREEN}✅ Mode: $MODE${NC}"
-            ;;
+        case $MODE in
+            instruments|missing-reports|download|validate|check-gaps|full-pipeline)
+                echo -e "${GREEN}✅ Mode: $MODE${NC}"
+                ;;
     *)
         echo -e "${RED}❌ Invalid mode: $MODE${NC}"
         show_usage

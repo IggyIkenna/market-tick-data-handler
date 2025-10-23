@@ -360,6 +360,107 @@ class MissingDataDownloadHandler(ModeHandler):
         
         return results
 
+class CheckGapsHandler(ModeHandler):
+    """Handles checking for file existence gaps in date ranges"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        from google.cloud import storage
+        self.client = storage.Client()
+        self.bucket = self.client.bucket(self.gcs_bucket)
+        self.data_validator = DataValidator(self.gcs_bucket)
+    
+    async def run(self, start_date: datetime, end_date: datetime,
+                  venues: List[str] = None, instrument_types: List[str] = None,
+                  data_types: List[str] = None, max_instruments: int = None,
+                  shard_index: int = None, total_shards: int = None, **kwargs):
+        """Check for file existence gaps in date range"""
+        logger.info(f"🔍 Checking for file existence gaps from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        results = {
+            'total_days': 0,
+            'days_with_instrument_definitions': 0,
+            'days_with_missing_data_reports': 0,
+            'gaps': [],
+            'summary': {}
+        }
+        
+        # Check each day for file existence
+        current_date = start_date
+        while current_date <= end_date:
+            results['total_days'] += 1
+            date_str = current_date.strftime('%Y-%m-%d')
+            
+            # Check for instrument definitions
+            instrument_def_path = f"instrument_availability/by_date/day-{date_str}/instruments.parquet"
+            instrument_blob = self.bucket.blob(instrument_def_path)
+            if instrument_blob.exists():
+                instrument_blob.reload()  # Reload to get size
+                has_instrument_defs = (instrument_blob.size or 0) > 0
+            else:
+                has_instrument_defs = False
+            
+            if has_instrument_defs:
+                results['days_with_instrument_definitions'] += 1
+            
+            # Check for missing data reports
+            missing_data_path = f"missing_data_reports/by_date/day-{date_str}/missing_data.parquet"
+            missing_data_blob = self.bucket.blob(missing_data_path)
+            if missing_data_blob.exists():
+                missing_data_blob.reload()  # Reload to get size
+                has_missing_data_report = (missing_data_blob.size or 0) > 0
+            else:
+                has_missing_data_report = False
+            
+            if has_missing_data_report:
+                results['days_with_missing_data_reports'] += 1
+            
+            # Record gaps
+            if not has_instrument_defs:
+                results['gaps'].append({
+                    'date': date_str,
+                    'type': 'instrument_definitions',
+                    'path': instrument_def_path,
+                    'size': (instrument_blob.size or 0) if instrument_blob.exists() else 0
+                })
+                logger.warning(f"❌ Missing instrument definitions for {date_str}")
+            
+            if not has_missing_data_report:
+                results['gaps'].append({
+                    'date': date_str,
+                    'type': 'missing_data_report',
+                    'path': missing_data_path,
+                    'size': (missing_data_blob.size or 0) if missing_data_blob.exists() else 0
+                })
+                logger.warning(f"❌ Missing missing data report for {date_str}")
+            
+            if has_instrument_defs and has_missing_data_report:
+                logger.info(f"✅ Complete files for {date_str}")
+            
+            current_date += timedelta(days=1)
+        
+        # Calculate summary
+        results['summary'] = {
+            'instrument_definitions_coverage': (results['days_with_instrument_definitions'] / results['total_days']) * 100,
+            'missing_data_reports_coverage': (results['days_with_missing_data_reports'] / results['total_days']) * 100,
+            'total_gaps': len(results['gaps'])
+        }
+        
+        logger.info('🎉 FILE EXISTENCE GAP CHECK COMPLETED')
+        logger.info(f"📊 Total days: {results['total_days']}")
+        logger.info(f"📋 Days with instrument definitions: {results['days_with_instrument_definitions']} ({results['summary']['instrument_definitions_coverage']:.1f}%)")
+        logger.info(f"📊 Days with missing data reports: {results['days_with_missing_data_reports']} ({results['summary']['missing_data_reports_coverage']:.1f}%)")
+        logger.info(f"❌ Total gaps found: {results['summary']['total_gaps']}")
+        
+        if results['gaps']:
+            logger.info("🔍 Gap details:")
+            for gap in results['gaps'][:10]:  # Show first 10 gaps
+                logger.info(f"   - {gap['date']}: {gap['type']} (size: {gap['size']} bytes)")
+            if len(results['gaps']) > 10:
+                logger.info(f"   ... and {len(results['gaps']) - 10} more gaps")
+        
+        return results
+
 class DataValidationHandler(ModeHandler):
     """Handles data validation and missing data checking"""
     
@@ -588,9 +689,9 @@ Examples:
     # Mode selection
     parser.add_argument(
         '--mode', 
-        choices=['instruments', 'missing-reports', 'download', 'validate', 'full-pipeline'],
+        choices=['instruments', 'missing-reports', 'download', 'validate', 'check-gaps', 'full-pipeline'],
         required=True,
-        help='Operation mode: instruments (generate definitions), missing-reports (generate missing data reports), download (download only missing data), validate (check missing data), full-pipeline (complete flow)'
+        help='Operation mode: instruments (generate definitions), missing-reports (generate missing data reports), download (download only missing data), validate (check missing data), check-gaps (check file existence gaps), full-pipeline (complete flow)'
     )
     
     # Date range
@@ -754,6 +855,15 @@ async def main():
             )
         elif args.mode == 'validate':
             handler = DataValidationHandler(config)
+            result = await handler.run(
+                start_date=start_date,
+                end_date=end_date,
+                venues=args.venues,
+                instrument_types=args.instrument_types,
+                data_types=args.data_types
+            )
+        elif args.mode == 'check-gaps':
+            handler = CheckGapsHandler(config)
             result = await handler.run(
                 start_date=start_date,
                 end_date=end_date,
