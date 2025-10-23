@@ -235,7 +235,8 @@ class ConfigManager:
             'base_url': os.getenv('TARDIS_BASE_URL', 'https://datasets.tardis.dev'),
             'timeout': int(os.getenv('TARDIS_TIMEOUT', '30')),
             'max_retries': int(os.getenv('TARDIS_MAX_RETRIES', '3')),
-            'max_concurrent': int(os.getenv('MAX_CONCURRENT_REQUESTS', '2')),
+            'max_concurrent': int(os.getenv('TARDIS_MAX_CONCURRENT', '50')),
+            'max_parallel_uploads': int(os.getenv('MAX_PARALLEL_UPLOADS', '20')),
             'rate_limit_per_vm': int(os.getenv('RATE_LIMIT_PER_VM', '1000000'))
         }
         
@@ -262,7 +263,7 @@ class ConfigManager:
         config['service'] = {
             'log_level': os.getenv('LOG_LEVEL', 'INFO'),
             'log_destination': os.getenv('LOG_DESTINATION', 'local'),
-            'max_concurrent_requests': int(os.getenv('MAX_CONCURRENT_REQUESTS', '2')),
+            'max_concurrent_requests': int(os.getenv('MAX_CONCURRENT_REQUESTS', '50')),
             'batch_size': int(os.getenv('BATCH_SIZE', '1000')),
             'memory_efficient': os.getenv('MEMORY_EFFICIENT', 'false').lower() == 'true',
             'enable_caching': os.getenv('ENABLE_CACHING', 'true').lower() == 'true',

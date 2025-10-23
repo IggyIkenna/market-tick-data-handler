@@ -169,7 +169,20 @@ class InstrumentGenerationHandler(ModeHandler):
                 # Combine all exchanges for this day
                 if daily_instruments:
                     import pandas as pd
-                    combined_df = pd.concat(daily_instruments, ignore_index=True)
+                    # Filter out empty DataFrames and clean all-NA columns to avoid FutureWarning
+                    non_empty_instruments = []
+                    for df in daily_instruments:
+                        if not df.empty:
+                            # Drop columns that are all NaN to avoid FutureWarning
+                            df_clean = df.dropna(axis=1, how='all')
+                            if not df_clean.empty:
+                                non_empty_instruments.append(df_clean)
+                    
+                    if non_empty_instruments:
+                        combined_df = pd.concat(non_empty_instruments, ignore_index=True)
+                    else:
+                        # All DataFrames were empty, create empty DataFrame with expected columns
+                        combined_df = pd.DataFrame()
                     results['total_instruments'] += len(combined_df)
                     
                     logger.info(f"  📊 Total instruments for {current_date.strftime('%Y-%m-%d')}: {len(combined_df)}")
@@ -212,7 +225,10 @@ class InstrumentGenerationHandler(ModeHandler):
                 
             except Exception as e:
                 logger.error(f"❌ Failed to create final aggregate: {e}")
+                logger.warning(f"⚠️ Individual daily files are still available in GCS")
+                logger.warning(f"⚠️ You can skip the aggregate file and use daily partitions instead")
                 results['errors'].append(f"Aggregate creation: {e}")
+                # Don't fail the entire operation for aggregate file issues
         
         # Print summary
         logger.info('🎉 INSTRUMENT GENERATION COMPLETED')
@@ -329,8 +345,8 @@ class MissingDataDownloadHandler(ModeHandler):
                     instrument_types=instrument_types,
                     data_types=data_types,
                     max_instruments=max_instruments,
-                    shard_index=shard_index,
-                    total_shards=total_shards
+                    shard_index=kwargs.get('shard_index'),
+                    total_shards=kwargs.get('total_shards')
                 )
                 
                 if download_result['status'] == 'success':
@@ -374,18 +390,17 @@ class CheckGapsHandler(ModeHandler):
                   venues: List[str] = None, instrument_types: List[str] = None,
                   data_types: List[str] = None, max_instruments: int = None,
                   shard_index: int = None, total_shards: int = None, **kwargs):
-        """Check for file existence gaps in date range"""
-        logger.info(f"🔍 Checking for file existence gaps from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        """Check for missing instrument definitions only - light check for gaps"""
+        logger.info(f"🔍 Checking for missing instrument definitions from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         
         results = {
             'total_days': 0,
             'days_with_instrument_definitions': 0,
-            'days_with_missing_data_reports': 0,
             'gaps': [],
             'summary': {}
         }
         
-        # Check each day for file existence
+        # Check each day for instrument definitions only
         current_date = start_date
         while current_date <= end_date:
             results['total_days'] += 1
@@ -402,21 +417,9 @@ class CheckGapsHandler(ModeHandler):
             
             if has_instrument_defs:
                 results['days_with_instrument_definitions'] += 1
-            
-            # Check for missing data reports
-            missing_data_path = f"missing_data_reports/by_date/day-{date_str}/missing_data.parquet"
-            missing_data_blob = self.bucket.blob(missing_data_path)
-            if missing_data_blob.exists():
-                missing_data_blob.reload()  # Reload to get size
-                has_missing_data_report = (missing_data_blob.size or 0) > 0
+                logger.info(f"✅ Instrument definitions exist for {date_str}")
             else:
-                has_missing_data_report = False
-            
-            if has_missing_data_report:
-                results['days_with_missing_data_reports'] += 1
-            
-            # Record gaps
-            if not has_instrument_defs:
+                # Record gaps - only instrument definitions are critical gaps
                 results['gaps'].append({
                     'date': date_str,
                     'type': 'instrument_definitions',
@@ -425,39 +428,27 @@ class CheckGapsHandler(ModeHandler):
                 })
                 logger.warning(f"❌ Missing instrument definitions for {date_str}")
             
-            if not has_missing_data_report:
-                results['gaps'].append({
-                    'date': date_str,
-                    'type': 'missing_data_report',
-                    'path': missing_data_path,
-                    'size': (missing_data_blob.size or 0) if missing_data_blob.exists() else 0
-                })
-                logger.warning(f"❌ Missing missing data report for {date_str}")
-            
-            if has_instrument_defs and has_missing_data_report:
-                logger.info(f"✅ Complete files for {date_str}")
-            
             current_date += timedelta(days=1)
         
         # Calculate summary
         results['summary'] = {
             'instrument_definitions_coverage': (results['days_with_instrument_definitions'] / results['total_days']) * 100,
-            'missing_data_reports_coverage': (results['days_with_missing_data_reports'] / results['total_days']) * 100,
             'total_gaps': len(results['gaps'])
         }
         
-        logger.info('🎉 FILE EXISTENCE GAP CHECK COMPLETED')
+        logger.info('🎉 INSTRUMENT DEFINITIONS GAP CHECK COMPLETED')
         logger.info(f"📊 Total days: {results['total_days']}")
         logger.info(f"📋 Days with instrument definitions: {results['days_with_instrument_definitions']} ({results['summary']['instrument_definitions_coverage']:.1f}%)")
-        logger.info(f"📊 Days with missing data reports: {results['days_with_missing_data_reports']} ({results['summary']['missing_data_reports_coverage']:.1f}%)")
         logger.info(f"❌ Total gaps found: {results['summary']['total_gaps']}")
         
         if results['gaps']:
-            logger.info("🔍 Gap details:")
+            logger.info("🔍 Gap details (missing instrument definitions):")
             for gap in results['gaps'][:10]:  # Show first 10 gaps
                 logger.info(f"   - {gap['date']}: {gap['type']} (size: {gap['size']} bytes)")
             if len(results['gaps']) > 10:
                 logger.info(f"   ... and {len(results['gaps']) - 10} more gaps")
+        else:
+            logger.info("✅ No gaps found - all days have instrument definitions")
         
         return results
 
@@ -608,7 +599,8 @@ class FullPipelineHandler(ModeHandler):
     
     async def _download_data_with_orchestrator(self, start_date: datetime, end_date: datetime,
                                              venues: List[str] = None, instrument_types: List[str] = None,
-                                             data_types: List[str] = None, max_instruments: int = None) -> dict:
+                                             data_types: List[str] = None, max_instruments: int = None,
+                                             shard_index: int = None, total_shards: int = None) -> dict:
         """Use DownloadOrchestrator directly for better functionality"""
         logger.info(f"📥 Starting tick data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         

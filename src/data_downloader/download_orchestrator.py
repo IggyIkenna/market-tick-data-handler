@@ -360,7 +360,8 @@ class DownloadOrchestrator:
         uploaded_files = []
         
         for data_type, df in download_results.items():
-            if df.empty:
+            # Skip only if df is None or not a DataFrame (indicating actual failure)
+            if df is None or (isinstance(df, list) and len(df) == 0):
                 continue
             
             # Add partitioning columns
@@ -371,6 +372,10 @@ class DownloadOrchestrator:
             df['venue'] = target['tardis_exchange']
             df['instrument_key'] = target['instrument_key']
             df['data_type'] = data_type
+            
+            # Log if this is an empty file
+            if df.empty:
+                logger.info(f"📭 Uploading empty {data_type} file with schema for {target['instrument_key']}")
             
             # Create single partition path (optimized strategy)
             gcs_path = self._create_gcs_path(target, date, data_type)

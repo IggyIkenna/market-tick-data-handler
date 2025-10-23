@@ -4,11 +4,23 @@ This document explains how to use the new centralized `src/main.py` entry point 
 
 ## Overview
 
-The new `src/main.py` provides a unified interface for:
+The new `src/main.py` provides a unified interface for the complete market data pipeline:
+
+### **5-Mode Workflow:**
+
+1. **`check-gaps`** → Find missing instrument definitions in date range
+2. **`instruments`** → Generate instrument definitions for any missing periods  
+3. **`missing-reports`** → Identify which instrument-level and data-type-level Tardis downloads are missing
+4. **`download`** → Backfill the missing Tardis data based on missing reports
+5. **`validate`** → Verify completeness after download
+
+### **Key Features:**
+- **Gap Detection**: Light check for missing instrument definitions
 - **Instrument Generation**: Generate canonical instrument definitions and upload to GCS
-- **Tick Data Download**: Download market data from Tardis and upload to GCS
+- **Missing Data Analysis**: Comprehensive analysis of missing tick data by instrument and data type
+- **Smart Downloads**: Download only missing data based on analysis reports
 - **Data Validation**: Validate data completeness and check for missing data
-- **Full Pipeline**: Run the complete workflow (instruments → download → validate)
+- **Full Pipeline**: Run the complete workflow (check-gaps → instruments → missing-reports → download → validate)
 
 ## Quick Start
 
@@ -56,14 +68,16 @@ python -m src.main --mode <MODE> --start-date <DATE> --end-date <DATE> [OPTIONS]
 
 | Mode | Description |
 |------|-------------|
+| `check-gaps` | Light check for missing instrument definitions in date range |
 | `instruments` | Generate instrument definitions and upload to GCS |
-| `download` | Download tick data and upload to GCS |
-| `validate` | Validate data completeness and check for missing data |
-| `full-pipeline` | Run complete pipeline (instruments + download + validate) |
+| `missing-reports` | Generate missing data reports for date range and upload to GCS |
+| `download` | Download only missing data (requires instrument definitions and missing data reports in GCS) |
+| `validate` | Check for missing data and validate completeness |
+| `full-pipeline` | Run complete pipeline (check-gaps → instruments → missing-reports → download → validate) |
 
 ### Required Arguments
 
-- `--mode`: Operation mode (instruments, download, validate, full-pipeline)
+- `--mode`: Operation mode (check-gaps, instruments, missing-reports, download, validate, full-pipeline)
 - `--start-date`: Start date in YYYY-MM-DD format
 - `--end-date`: End date in YYYY-MM-DD format
 
@@ -86,6 +100,16 @@ python -m src.main --mode <MODE> --start-date <DATE> --end-date <DATE> [OPTIONS]
 
 ## Examples
 
+### Gap Detection
+
+```bash
+# Check for missing instrument definitions
+python -m src.main --mode check-gaps --start-date 2023-05-23 --end-date 2023-05-25
+
+# Check specific date range
+python -m src.main --mode check-gaps --start-date 2023-05-24 --end-date 2023-05-26
+```
+
 ### Instrument Generation
 
 ```bash
@@ -101,6 +125,19 @@ python -m src.main --mode instruments \
 python -m src.main --mode instruments \
   --start-date 2023-05-23 --end-date 2023-05-25 \
   --env-file .env.production
+```
+
+### Missing Data Reports
+
+```bash
+# Generate missing data reports
+python -m src.main --mode missing-reports --start-date 2023-05-23 --end-date 2023-05-25
+
+# Generate reports for specific venues and data types
+python -m src.main --mode missing-reports \
+  --start-date 2023-05-23 --end-date 2023-05-25 \
+  --venues deribit binance-futures \
+  --data-types trades book_snapshot_5
 ```
 
 ### Tick Data Download
@@ -141,7 +178,7 @@ python -m src.main --mode validate \
 ### Full Pipeline
 
 ```bash
-# Complete pipeline
+# Complete pipeline (check-gaps → instruments → missing-reports → download → validate)
 python -m src.main --mode full-pipeline \
   --start-date 2023-05-23 --end-date 2023-05-25
 
@@ -152,6 +189,25 @@ python -m src.main --mode full-pipeline \
   --venues deribit \
   --instrument-types option perpetual \
   --data-types trades book_snapshot_5
+```
+
+### Complete Workflow Example
+
+```bash
+# Step 1: Check for gaps in instrument definitions
+python -m src.main --mode check-gaps --start-date 2023-05-23 --end-date 2023-05-25
+
+# Step 2: Generate instrument definitions for missing periods
+python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
+
+# Step 3: Generate missing data reports
+python -m src.main --mode missing-reports --start-date 2023-05-23 --end-date 2023-05-25
+
+# Step 4: Download missing data
+python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25
+
+# Step 5: Validate completeness
+python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ## Environment Configuration
@@ -222,8 +278,10 @@ docker run --env-file .env \
 ### Local Execution
 
 ```bash
-# Use the convenience script
+# Use the convenience script for all modes
+./deploy/local/run-main.sh check-gaps --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh missing-reports --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh validate --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25

@@ -257,8 +257,7 @@ class CanonicalInstrumentKeyGenerator:
 
     def process_exchange_symbols(self, exchange: str, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
         """Process symbols for an exchange and generate canonical instrument keys"""
-        print(f"🔄 Processing {exchange} symbols...")
-        logger.info(f"Processing {exchange} symbols...")
+        logger.info(f"🔄 Processing {exchange} symbols...")
         
         # Get symbols from Tardis API
         url = f'https://api.tardis.dev/v1/exchanges/{exchange}'
@@ -268,7 +267,7 @@ class CanonicalInstrumentKeyGenerator:
         exchange_data = response.json()
         symbols = exchange_data.get('availableSymbols', [])
         
-        print(f"  📊 Found {len(symbols)} raw symbols from API")
+        logger.info(f"📊 Found {len(symbols)} raw symbols from API")
         
         instruments = {}
         start_date_str = start_date.strftime("%Y-%m-%d")
@@ -317,15 +316,16 @@ class CanonicalInstrumentKeyGenerator:
                         # For spot/perpetuals, use a far future date since they don't expire
                         available_to = datetime(2099, 12, 31, tzinfo=timezone.utc)
                         if stats['failed_parsing'] <= 3:  # Only log first few
-                            print(f"    ℹ️ No expiry date for {symbol_id} ({symbol_type}) - this is expected")
+                            # Suppress verbose parsing logs - only log at debug level
+                            logger.debug(f"No expiry date for {symbol_id} ({symbol_type}) - this is expected")
                     else:
                         # For options/futures, try to parse expiry from symbol name
                         parsed_expiry = self._try_parse_expiry_from_symbol(exchange, symbol_id, symbol_type)
                         if parsed_expiry:
                             # Use parsed expiry date
                             available_to = parsed_expiry
-                            if stats['failed_parsing'] <= 3:  # Only log first few
-                                print(f"    ℹ️ Parsed expiry date for {symbol_id} ({symbol_type}) from symbol name: {parsed_expiry.strftime('%Y-%m-%d')}")
+                            # Suppress verbose parsing logs - only log at debug level
+                            logger.debug(f"Parsed expiry date for {symbol_id} ({symbol_type}) from symbol name: {parsed_expiry.strftime('%Y-%m-%d')}")
                         else:
                             # For options/futures, availableTo is required
                             # Skip logging errors for combo instruments as they're expected to fail
@@ -480,20 +480,20 @@ class CanonicalInstrumentKeyGenerator:
         #     deribit_options = self.fetch_deribit_individual_options(exchange, start_date)
         #     instruments.update(deribit_options)
         
-        # Print processing summary
-        print(f"  ✅ Generated {stats['generated']} instruments")
+        # Log processing summary
+        logger.info(f"✅ Generated {stats['generated']} instruments")
         if stats['skipped_aggregate'] > 0:
-            print(f"  ⏭️ Skipped {stats['skipped_aggregate']} aggregate symbols")
+            logger.info(f"⏭️ Skipped {stats['skipped_aggregate']} aggregate symbols")
         if stats['skipped_date_range'] > 0:
-            print(f"  📅 Skipped {stats['skipped_date_range']} symbols (date range)")
+            logger.info(f"📅 Skipped {stats['skipped_date_range']} symbols (date range)")
         if stats['skipped_filters'] > 0:
-            print(f"  🔍 Skipped {stats['skipped_filters']} symbols (filters)")
+            logger.info(f"🔍 Skipped {stats['skipped_filters']} symbols (filters)")
         if stats['failed_parsing'] > 0:
-            print(f"  ⚠️ Failed to parse {stats['failed_parsing']} symbols")
+            logger.warning(f"⚠️ Failed to parse {stats['failed_parsing']} symbols")
             # Show all parsing failures for debugging
-            print(f"  🔍 All parsing failures:")
+            logger.debug(f"🔍 All parsing failures:")
             for i, failure in enumerate(stats.get('parsing_failures', []), 1):
-                print(f"    {i}. {failure}")
+                logger.debug(f"    {i}. {failure}")
                     
         logger.info(f"Generated {len(instruments)} instrument keys for {exchange}")
         return instruments, stats
@@ -503,7 +503,7 @@ class CanonicalInstrumentKeyGenerator:
         
         # Debug logging for problematic symbols
         if symbol_id in ['USDT-TRY', 'USDT-EUR', 'USDT-BRL', 'USDC-EUR', 'USDT-USDC']:
-            print(f"    🔍 Parsing fiat pair: {symbol_id}")
+            logger.debug(f"🔍 Parsing fiat pair: {symbol_id}")
         
         # Define exchange-specific patterns
         mapping_formats = {

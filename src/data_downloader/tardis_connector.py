@@ -70,6 +70,16 @@ class RetryStrategy:
     
     async def execute(self, operation, *args, **kwargs):
         """Execute operation with retry logic"""
+        # If max_retries=0, fail fast on first attempt
+        if self.max_retries == 0:
+            try:
+                return await operation(*args, **kwargs)
+            except Exception as e:
+                error_msg = str(e) if str(e).strip() else f"{type(e).__name__}: {e}"
+                logger.error(f"Failed on first attempt: {error_msg}")
+                raise e
+        
+        # Original retry logic for max_retries > 0
         for attempt in range(self.max_retries + 1):
             try:
                 return await operation(*args, **kwargs)
@@ -143,11 +153,11 @@ class TardisConnector:
         self.rate_limiter = TokenBucket(self.rate_limit_per_vm, 86400)  # 1M per day
         self.semaphore = asyncio.Semaphore(self.max_concurrent)
         
-        # Retry strategies
+        # Retry strategies - fail fast to save time
         self.retry_strategies = {
-            'network': ExponentialBackoffRetry(max_retries=2, base_delay=0.5),  # Reduced retries and faster initial delay
-            'rate_limit': RateLimitRetry(max_retries=10),
-            'api_error': ExponentialBackoffRetry(max_retries=3, base_delay=1.0)  # Reduced retries
+            'network': ExponentialBackoffRetry(max_retries=0, base_delay=0.0),  # No retries - fail fast
+            'rate_limit': RateLimitRetry(max_retries=0),  # No retries - fail fast
+            'api_error': ExponentialBackoffRetry(max_retries=0, base_delay=0.0)  # No retries - fail fast
         }
         
         # Session management
@@ -253,22 +263,31 @@ class TardisConnector:
         else:
             return data
     
-    def _parse_csv_data(self, data: bytes, data_type: str) -> pd.DataFrame:
-        """Parse CSV data into pandas DataFrame with proper typing"""
+    def _parse_csv_data(self, data: bytes, data_type: str, tardis_exchange: str = None, tardis_symbol: str = None) -> pd.DataFrame:
+        """Parse CSV data into pandas DataFrame with proper typing - keep all Tardis fields as-is"""
         try:
             # Decode bytes to string
             csv_content = data.decode('utf-8')
             
+            # Check if content is empty
+            if not csv_content.strip():
+                instrument_info = f"{tardis_exchange}:{tardis_symbol}" if tardis_exchange and tardis_symbol else "unknown"
+                logger.info(f"📭 Empty CSV content for {data_type} ({instrument_info}) - creating empty file with schema")
+                return self._create_empty_dataframe_with_schema(data_type)
+            
             # Read CSV into pandas DataFrame
             df = pd.read_csv(io.StringIO(csv_content))
             
-            # Remove exchange and symbol columns as requested
-            if 'exchange' in df.columns:
-                df = df.drop('exchange', axis=1)
-            if 'symbol' in df.columns:
-                df = df.drop('symbol', axis=1)
+            # Check if DataFrame is empty after parsing
+            if df.empty:
+                instrument_info = f"{tardis_exchange}:{tardis_symbol}" if tardis_exchange and tardis_symbol else "unknown"
+                logger.info(f"📭 Empty DataFrame after parsing CSV for {data_type} ({instrument_info}) - creating empty file with schema")
+                return self._create_empty_dataframe_with_schema(data_type)
             
-            # Apply proper typing based on data type
+            # Keep ALL fields from Tardis - no dropping of exchange/symbol for validation
+            # We'll validate against instrument definitions later
+            
+            # Apply proper typing based on data type according to tardis_schema.md
             if data_type == 'trades':
                 df = self._type_trades_dataframe(df)
             elif data_type == 'book_snapshot_5':
@@ -285,11 +304,18 @@ class TardisConnector:
             return df
             
         except Exception as e:
-            logger.error(f"Failed to parse CSV data: {e}")
+            instrument_info = f"{tardis_exchange}:{tardis_symbol}" if tardis_exchange and tardis_symbol else "unknown"
+            logger.error(f"Failed to parse CSV data for {data_type} ({instrument_info}): {e}")
             return pd.DataFrame()
     
     def _type_trades_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply proper typing to trades DataFrame"""
+        """Apply proper typing to trades DataFrame according to tardis_schema.md"""
+        # Keep exchange and symbol as strings for validation
+        if 'exchange' in df.columns:
+            df['exchange'] = df['exchange'].astype('string')
+        if 'symbol' in df.columns:
+            df['symbol'] = df['symbol'].astype('string')
+        
         # Convert timestamps to int64 (microseconds) - handle NaN values
         df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce').astype('Int64')
         df['local_timestamp'] = pd.to_numeric(df['local_timestamp'], errors='coerce').astype('Int64')
@@ -324,9 +350,18 @@ class TardisConnector:
         return df
     
     def _type_derivative_ticker_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply proper typing to derivative ticker DataFrame"""
-        # Convert timestamp to int64 (microseconds) - handle NaN values
-        df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce').astype('Int64')
+        """Apply proper typing to derivative ticker DataFrame according to tardis_schema.md"""
+        # Keep exchange and symbol as strings for validation
+        if 'exchange' in df.columns:
+            df['exchange'] = df['exchange'].astype('string')
+        if 'symbol' in df.columns:
+            df['symbol'] = df['symbol'].astype('string')
+        
+        # Convert timestamps to int64 (microseconds) - handle NaN values
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce').astype('Int64')
+        if 'local_timestamp' in df.columns:
+            df['local_timestamp'] = pd.to_numeric(df['local_timestamp'], errors='coerce').astype('Int64')
         
         # Convert all numeric columns to float64
         numeric_cols = ['funding_rate', 'predicted_funding_rate', 'open_interest', 
@@ -342,8 +377,14 @@ class TardisConnector:
         return df
     
     def _type_liquidations_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply proper typing to liquidations DataFrame"""
-        # Convert timestamp to int64 (microseconds) - handle NaN values
+        """Apply proper typing to liquidations DataFrame according to tardis_schema.md"""
+        # Keep exchange and symbol as strings for validation
+        if 'exchange' in df.columns:
+            df['exchange'] = df['exchange'].astype('string')
+        if 'symbol' in df.columns:
+            df['symbol'] = df['symbol'].astype('string')
+        
+        # Convert timestamps to int64 (microseconds) - handle NaN values
         df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce').astype('Int64')
         df['local_timestamp'] = pd.to_numeric(df['local_timestamp'], errors='coerce').astype('Int64')
         
@@ -373,28 +414,30 @@ class TardisConnector:
         return df
     
     def _type_options_chain_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply proper typing to options chain DataFrame"""
+        """Apply proper typing to options chain DataFrame according to tardis_schema.md"""
+        # Keep exchange and symbol as strings for validation
+        if 'exchange' in df.columns:
+            df['exchange'] = df['exchange'].astype('string')
+        if 'symbol' in df.columns:
+            df['symbol'] = df['symbol'].astype('string')
+        
         # Convert timestamps to int64 (microseconds) - handle NaN values
         df['timestamp'] = pd.to_numeric(df['timestamp'], errors='coerce').astype('Int64')
         df['local_timestamp'] = pd.to_numeric(df['local_timestamp'], errors='coerce').astype('Int64')
-        df['expiration'] = pd.to_numeric(df['expiration'], errors='coerce').astype('Int64')
         
-        # Convert numeric fields to float64
+        # Convert numeric fields to float64 according to schema
         numeric_fields = [
-            'strike_price', 'open_interest', 'last_price', 'bid_price', 'bid_amount', 'bid_iv',
-            'ask_price', 'ask_amount', 'ask_iv', 'mark_price', 'mark_iv', 'underlying_price',
-            'delta', 'gamma', 'vega', 'theta', 'rho'
+            'mark_price', 'index_price', 'bid_price', 'bid_amount', 'ask_price', 'ask_amount',
+            'delta', 'gamma', 'vega', 'theta', 'rho', 'iv', 'open_interest', 'volume'
         ]
         
         for field in numeric_fields:
             if field in df.columns:
                 df[field] = pd.to_numeric(df[field], errors='coerce').astype('float64')
         
-        # Keep string fields as strings
-        string_fields = ['exchange', 'symbol', 'type', 'underlying_index']
-        for field in string_fields:
-            if field in df.columns:
-                df[field] = df[field].astype('string')
+        # Convert funding_timestamp to int64 - handle NaN values
+        if 'funding_timestamp' in df.columns:
+            df['funding_timestamp'] = pd.to_numeric(df['funding_timestamp'], errors='coerce').astype('Int64')
         
         return df
     
@@ -659,17 +702,165 @@ class TardisConnector:
                     data = response.data
                 
                 # Parse CSV data directly to DataFrame with proper typing
-                df = self._parse_csv_data(data, data_type)
+                df = self._parse_csv_data(data, data_type, tardis_exchange, tardis_symbol)
                 
                 if not df.empty:
-                    result[data_type] = df
-                    logger.info(f"Downloaded {len(df)} {data_type} records for {tardis_exchange}:{tardis_symbol}")
+                    # Validate that downloaded data matches expected exchange/symbol
+                    self._validate_tardis_data(df, tardis_exchange, tardis_symbol, data_type)
+                    
+                    # Drop exchange and symbol columns after validation
+                    df_cleaned = self._drop_validation_columns(df)
+                    
+                    result[data_type] = df_cleaned
+                    logger.info(f"Downloaded {len(df_cleaned)} {data_type} records for {tardis_exchange}:{tardis_symbol}")
+                else:
+                    logger.info(f"📭 No data available for {data_type} ({tardis_exchange}:{tardis_symbol}) - creating empty file with schema")
+                    # Create empty DataFrame with correct schema instead of empty list
+                    empty_df = self._create_empty_dataframe_with_schema(data_type)
+                    result[data_type] = empty_df
                 
             except Exception as e:
-                logger.error(f"Failed to download {data_type} for {tardis_exchange}:{tardis_symbol}: {e}")
-                result[data_type] = []
+                logger.error(f"❌ Failed to download {data_type} for {tardis_exchange}:{tardis_symbol}: {e}")
+                result[data_type] = []  # Empty list indicates failure
         
         return result
+    
+    def _create_empty_dataframe_with_schema(self, data_type: str) -> pd.DataFrame:
+        """Create an empty DataFrame with the correct schema for the data type"""
+        if data_type == 'trades':
+            # Create empty DataFrame with TradeData schema
+            df = pd.DataFrame(columns=[
+                'timestamp', 'local_timestamp', 'id', 'side', 'price', 'amount'
+            ])
+            # Set proper dtypes
+            df['timestamp'] = df['timestamp'].astype('Int64')
+            df['local_timestamp'] = df['local_timestamp'].astype('Int64')
+            df['id'] = df['id'].astype('string')
+            df['side'] = df['side'].astype('string')
+            df['price'] = df['price'].astype('float64')
+            df['amount'] = df['amount'].astype('float64')
+            
+        elif data_type == 'liquidations':
+            # Create empty DataFrame with Liquidations schema
+            df = pd.DataFrame(columns=[
+                'timestamp', 'local_timestamp', 'id', 'side', 'price', 'amount'
+            ])
+            # Set proper dtypes
+            df['timestamp'] = df['timestamp'].astype('Int64')
+            df['local_timestamp'] = df['local_timestamp'].astype('Int64')
+            df['id'] = df['id'].astype('string')
+            df['side'] = df['side'].astype('string')
+            df['price'] = df['price'].astype('float64')
+            df['amount'] = df['amount'].astype('float64')
+            
+        elif data_type == 'derivative_ticker':
+            # Create empty DataFrame with DerivativeTicker schema
+            df = pd.DataFrame(columns=[
+                'timestamp', 'local_timestamp', 'funding_rate', 'predicted_funding_rate',
+                'open_interest', 'last_price', 'index_price', 'mark_price', 'funding_timestamp'
+            ])
+            # Set proper dtypes
+            df['timestamp'] = df['timestamp'].astype('Int64')
+            df['local_timestamp'] = df['local_timestamp'].astype('Int64')
+            df['funding_rate'] = df['funding_rate'].astype('float64')
+            df['predicted_funding_rate'] = df['predicted_funding_rate'].astype('float64')
+            df['open_interest'] = df['open_interest'].astype('float64')
+            df['last_price'] = df['last_price'].astype('float64')
+            df['index_price'] = df['index_price'].astype('float64')
+            df['mark_price'] = df['mark_price'].astype('float64')
+            df['funding_timestamp'] = df['funding_timestamp'].astype('Int64')
+            
+        elif data_type == 'options_chain':
+            # Create empty DataFrame with OptionsChain schema
+            df = pd.DataFrame(columns=[
+                'timestamp', 'local_timestamp', 'mark_price', 'index_price', 'bid_price', 'bid_amount',
+                'ask_price', 'ask_amount', 'delta', 'gamma', 'vega', 'theta', 'rho', 'iv',
+                'open_interest', 'volume', 'funding_timestamp'
+            ])
+            # Set proper dtypes
+            df['timestamp'] = df['timestamp'].astype('Int64')
+            df['local_timestamp'] = df['local_timestamp'].astype('Int64')
+            df['mark_price'] = df['mark_price'].astype('float64')
+            df['index_price'] = df['index_price'].astype('float64')
+            df['bid_price'] = df['bid_price'].astype('float64')
+            df['bid_amount'] = df['bid_amount'].astype('float64')
+            df['ask_price'] = df['ask_price'].astype('float64')
+            df['ask_amount'] = df['ask_amount'].astype('float64')
+            df['delta'] = df['delta'].astype('float64')
+            df['gamma'] = df['gamma'].astype('float64')
+            df['vega'] = df['vega'].astype('float64')
+            df['theta'] = df['theta'].astype('float64')
+            df['rho'] = df['rho'].astype('float64')
+            df['iv'] = df['iv'].astype('float64')
+            df['open_interest'] = df['open_interest'].astype('float64')
+            df['volume'] = df['volume'].astype('float64')
+            df['funding_timestamp'] = df['funding_timestamp'].astype('Int64')
+            
+        elif data_type == 'book_snapshot_5':
+            # Create empty DataFrame with BookSnapshot schema (simplified)
+            df = pd.DataFrame(columns=[
+                'timestamp', 'local_timestamp', 'bid_price_0', 'bid_amount_0', 'ask_price_0', 'ask_amount_0',
+                'bid_price_1', 'bid_amount_1', 'ask_price_1', 'ask_amount_1',
+                'bid_price_2', 'bid_amount_2', 'ask_price_2', 'ask_amount_2',
+                'bid_price_3', 'bid_amount_3', 'ask_price_3', 'ask_amount_3',
+                'bid_price_4', 'bid_amount_4', 'ask_price_4', 'ask_amount_4'
+            ])
+            # Set proper dtypes
+            df['timestamp'] = df['timestamp'].astype('Int64')
+            df['local_timestamp'] = df['local_timestamp'].astype('Int64')
+            for col in df.columns:
+                if col not in ['timestamp', 'local_timestamp']:
+                    df[col] = df[col].astype('float64')
+                    
+        elif data_type == 'quotes':
+            # Create empty DataFrame with quotes schema (simplified)
+            df = pd.DataFrame(columns=[
+                'timestamp', 'local_timestamp', 'bid_price', 'bid_amount', 'ask_price', 'ask_amount'
+            ])
+            # Set proper dtypes
+            df['timestamp'] = df['timestamp'].astype('Int64')
+            df['local_timestamp'] = df['local_timestamp'].astype('Int64')
+            df['bid_price'] = df['bid_price'].astype('float64')
+            df['bid_amount'] = df['bid_amount'].astype('float64')
+            df['ask_price'] = df['ask_price'].astype('float64')
+            df['ask_amount'] = df['ask_amount'].astype('float64')
+            
+        else:
+            # Fallback: create empty DataFrame
+            df = pd.DataFrame()
+            
+        return df
+    
+    def _validate_tardis_data(self, df: pd.DataFrame, expected_exchange: str, expected_symbol: str, data_type: str):
+        """Validate that downloaded Tardis data matches expected exchange and symbol"""
+        if 'exchange' in df.columns and not df.empty:
+            actual_exchanges = df['exchange'].unique()
+            if len(actual_exchanges) > 1:
+                logger.warning(f"Multiple exchanges in {data_type} data: {actual_exchanges}")
+            elif actual_exchanges[0] != expected_exchange:
+                logger.warning(f"Exchange mismatch in {data_type}: expected {expected_exchange}, got {actual_exchanges[0]}")
+        
+        if 'symbol' in df.columns and not df.empty:
+            actual_symbols = df['symbol'].unique()
+            if len(actual_symbols) > 1:
+                logger.warning(f"Multiple symbols in {data_type} data: {actual_symbols}")
+            elif actual_symbols[0] != expected_symbol:
+                logger.warning(f"Symbol mismatch in {data_type}: expected {expected_symbol}, got {actual_symbols[0]}")
+        
+        logger.debug(f"✅ Validated {data_type} data: {expected_exchange}:{expected_symbol}")
+    
+    def _drop_validation_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Drop exchange and symbol columns after validation"""
+        df_cleaned = df.copy()
+        
+        # Drop exchange and symbol columns after validation
+        if 'exchange' in df_cleaned.columns:
+            df_cleaned = df_cleaned.drop('exchange', axis=1)
+        if 'symbol' in df_cleaned.columns:
+            df_cleaned = df_cleaned.drop('symbol', axis=1)
+        
+        logger.debug(f"Dropped validation columns, remaining columns: {list(df_cleaned.columns)}")
+        return df_cleaned
     
     def save_to_parquet(self, df: pd.DataFrame, output_path: Path) -> None:
         """Save DataFrame to Parquet format with compression"""
