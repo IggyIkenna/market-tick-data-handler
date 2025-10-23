@@ -50,7 +50,8 @@ logger = setup_structured_logging(
     log_level=os.getenv('LOG_LEVEL', 'INFO'),
     console_output=True,
     include_timestamp=True,
-    include_level=True
+    include_level=True,
+    gcp_logging=os.getenv('LOG_DESTINATION', 'local') in ['gcp', 'both']
 )
 
 class ModeHandler:

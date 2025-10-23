@@ -118,7 +118,8 @@ def setup_structured_logging(
     log_file: Optional[Union[str, Path]] = None,
     console_output: bool = True,
     include_timestamp: bool = True,
-    include_level: bool = True
+    include_level: bool = True,
+    gcp_logging: bool = False
 ) -> logging.Logger:
     """
     Setup structured logging with consistent formatting
@@ -157,6 +158,18 @@ def setup_structured_logging(
         file_handler = logging.FileHandler(log_path)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
+    
+    # Google Cloud Logging handler
+    if gcp_logging:
+        try:
+            from google.cloud import logging as cloud_logging
+            client = cloud_logging.Client()
+            client.setup_logging()
+            # GCP handler will use the root logger, so we don't need to add it explicitly
+        except ImportError:
+            logger.warning("google-cloud-logging not available, skipping GCP logging setup")
+        except Exception as e:
+            logger.warning(f"Failed to setup GCP logging: {e}")
     
     # Set specific loggers to reduce noise
     logging.getLogger('google.cloud').setLevel(logging.WARNING)
