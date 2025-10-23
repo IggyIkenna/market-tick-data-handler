@@ -22,6 +22,7 @@ import os
 import argparse
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Optional
@@ -39,15 +40,18 @@ from src.data_downloader.download_orchestrator import DownloadOrchestrator
 from src.data_validator.data_validator import DataValidator
 # MarketDataOrchestrator removed - using DownloadOrchestrator directly
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+# Import enhanced utilities
+from src.utils.logger import setup_structured_logging, PerformanceLogger, log_operation_start, log_operation_success, log_operation_failure
+from src.utils.error_handler import ErrorHandler, ErrorContext, error_handler, ErrorCategory
+from src.utils.performance_monitor import performance_monitor, get_performance_monitor, start_performance_monitoring
+
+# Configure structured logging
+logger = setup_structured_logging(
+    log_level=os.getenv('LOG_LEVEL', 'INFO'),
+    console_output=True,
+    include_timestamp=True,
+    include_level=True
 )
-logger = logging.getLogger(__name__)
 
 class ModeHandler:
     """Base class for different operation modes"""
@@ -773,7 +777,7 @@ Examples:
     return parser.parse_args()
 
 def setup_logging(log_level: str, verbose: bool = False):
-    """Setup logging configuration"""
+    """Setup logging configuration (legacy function - now using structured logging)"""
     if verbose:
         log_level = 'DEBUG'
     
@@ -801,13 +805,19 @@ def parse_date(date_str: str) -> datetime:
         raise ValueError(f"Invalid date format '{date_str}'. Use YYYY-MM-DD format.") from e
 
 async def main():
-    """Main entry point"""
+    """Main entry point with enhanced monitoring and error handling"""
+    error_handler = ErrorHandler(logger)
+    context = ErrorContext(operation="main", component="main.py")
+    
     try:
+        # Start performance monitoring
+        start_performance_monitoring(interval=60)
+        
         # Parse arguments
         args = parse_arguments()
         
-        # Setup logging
-        setup_logging(args.log_level, args.verbose)
+        # Setup logging (already configured above with structured logging)
+        # setup_logging(args.log_level, args.verbose)  # Replaced with structured logging
         
         # Load environment file if specified
         if args.env_file:
@@ -878,10 +888,33 @@ async def main():
         
         # Print final result
         logger.info("✅ Operation completed successfully")
+        
+        # Export performance metrics
+        performance_monitor = get_performance_monitor()
+        performance_monitor.export_metrics(f"performance_metrics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        
+        # Print performance summary
+        perf_summary = get_performance_monitor().get_operation_stats()
+        if perf_summary:
+            logger.info("📊 Performance Summary:")
+            for operation, stats in perf_summary.items():
+                if stats['count'] > 0:
+                    avg_duration = stats['total_duration'] / stats['count']
+                    logger.info(f"  {operation}: {stats['count']} calls, avg {avg_duration:.3f}s")
+        
         return result
         
     except Exception as e:
-        logger.error(f"❌ Operation failed: {e}")
+        enhanced_error = error_handler.handle_error(e, context)
+        logger.error(f"❌ Fatal error: {enhanced_error.message}")
+        logger.error(f"🔍 Error category: {enhanced_error.category.value}")
+        logger.error(f"⚠️ Severity: {enhanced_error.severity.value}")
+        logger.error(f"🔄 Recovery strategy: {enhanced_error.recovery_strategy.value}")
+        
+        # Export error summary
+        error_summary = error_handler.get_error_summary()
+        logger.error(f"📊 Error summary: {error_summary}")
+        
         if args.verbose:
             import traceback
             traceback.print_exc()

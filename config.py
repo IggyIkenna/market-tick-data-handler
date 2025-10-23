@@ -25,21 +25,42 @@ class TardisConfig:
     rate_limit_per_vm: int = 1000000  # 1M calls per day per VM
     
     def __post_init__(self):
-        """Validate Tardis configuration"""
+        """Validate Tardis configuration with enhanced error messages"""
+        validation_errors = []
+        
         if not self.api_key:
-            raise ValueError("Tardis API key is required")
-        if not self.api_key.startswith('TD.'):
-            raise ValueError("Invalid Tardis API key format")
+            validation_errors.append("Tardis API key is required - set TARDIS_API_KEY environment variable")
+        elif not self.api_key.startswith('TD.'):
+            validation_errors.append(f"Invalid Tardis API key format: expected 'TD.xxx' but got '{self.api_key[:10]}...'")
+        
         if self.timeout <= 0:
-            raise ValueError("Timeout must be positive")
+            validation_errors.append(f"Timeout must be positive, got {self.timeout}")
+        elif self.timeout > 300:
+            validation_errors.append(f"Timeout seems too high ({self.timeout}s), consider reducing for better performance")
+        
         if self.max_retries < 0:
-            raise ValueError("Max retries must be non-negative")
+            validation_errors.append(f"Max retries must be non-negative, got {self.max_retries}")
+        elif self.max_retries > 10:
+            validation_errors.append(f"Max retries seems too high ({self.max_retries}), consider reducing for faster failure detection")
+        
         if self.max_concurrent <= 0:
-            raise ValueError("Max concurrent must be positive")
+            validation_errors.append(f"Max concurrent must be positive, got {self.max_concurrent}")
+        elif self.max_concurrent > 100:
+            validation_errors.append(f"Max concurrent seems too high ({self.max_concurrent}), consider reducing to avoid rate limiting")
+        
         if self.max_parallel_uploads <= 0:
-            raise ValueError("Max parallel uploads must be positive")
+            validation_errors.append(f"Max parallel uploads must be positive, got {self.max_parallel_uploads}")
+        elif self.max_parallel_uploads > 50:
+            validation_errors.append(f"Max parallel uploads seems too high ({self.max_parallel_uploads}), consider reducing to avoid overwhelming GCS")
+        
         if self.rate_limit_per_vm <= 0:
-            raise ValueError("Rate limit per VM must be positive")
+            validation_errors.append(f"Rate limit per VM must be positive, got {self.rate_limit_per_vm}")
+        elif self.rate_limit_per_vm < 100000:
+            validation_errors.append(f"Rate limit per VM seems too low ({self.rate_limit_per_vm}), consider increasing for better throughput")
+        
+        if validation_errors:
+            error_message = "Tardis configuration validation failed:\n" + "\n".join(f"  - {error}" for error in validation_errors)
+            raise ValueError(error_message)
 
 @dataclass
 class GCPConfig:
@@ -50,17 +71,36 @@ class GCPConfig:
     region: str = "asia-northeast1-c"
     
     def __post_init__(self):
-        """Validate GCP configuration"""
-        if not self.project_id:
-            raise ValueError("GCP project ID is required")
-        if not self.credentials_path:
-            raise ValueError("GCP credentials path is required")
-        if not self.bucket:
-            raise ValueError("GCS bucket name is required")
+        """Validate GCP configuration with enhanced error messages"""
+        validation_errors = []
         
-        # Check if credentials file exists
-        if not Path(self.credentials_path).exists():
-            raise FileNotFoundError(f"GCP credentials file not found: {self.credentials_path}")
+        if not self.project_id:
+            validation_errors.append("GCP project ID is required - set GCP_PROJECT_ID environment variable")
+        elif not self.project_id.replace('-', '').replace('_', '').isalnum():
+            validation_errors.append(f"GCP project ID contains invalid characters: '{self.project_id}'")
+        
+        if not self.credentials_path:
+            validation_errors.append("GCP credentials path is required - set GCP_CREDENTIALS_PATH environment variable")
+        elif not Path(self.credentials_path).exists():
+            validation_errors.append(f"GCP credentials file not found: {self.credentials_path}")
+        elif not self.credentials_path.endswith('.json'):
+            validation_errors.append(f"GCP credentials file should be a JSON file: {self.credentials_path}")
+        
+        if not self.bucket:
+            validation_errors.append("GCS bucket name is required - set GCS_BUCKET environment variable")
+        elif not self.bucket.replace('-', '').replace('_', '').isalnum():
+            validation_errors.append(f"GCS bucket name contains invalid characters: '{self.bucket}'")
+        elif len(self.bucket) < 3 or len(self.bucket) > 63:
+            validation_errors.append(f"GCS bucket name must be 3-63 characters long, got {len(self.bucket)}")
+        
+        if not self.region:
+            validation_errors.append("GCP region is required")
+        elif not self.region.replace('-', '').replace('_', '').isalnum():
+            validation_errors.append(f"GCP region contains invalid characters: '{self.region}'")
+        
+        if validation_errors:
+            error_message = "GCP configuration validation failed:\n" + "\n".join(f"  - {error}" for error in validation_errors)
+            raise ValueError(error_message)
 
 @dataclass
 class ServiceConfig:
