@@ -13,10 +13,28 @@ import tempfile
 from pathlib import Path
 import logging
 from typing import List, Dict, Any
+from pydantic import ValidationError
+import io
 
 from ..models import InstrumentDefinition
 
 logger = logging.getLogger(__name__)
+
+class WarningCaptureHandler(logging.Handler):
+    """Custom logging handler to capture warning messages"""
+    def __init__(self):
+        super().__init__()
+        self.warnings = []
+    
+    def emit(self, record):
+        if record.levelno == logging.WARNING:
+            self.warnings.append(self.format(record))
+    
+    def get_warnings(self):
+        return self.warnings.copy()
+    
+    def clear_warnings(self):
+        self.warnings.clear()
 
 class InstrumentGCSUploader:
     """Uploads instrument definitions to GCS with optimized single partition strategy"""
@@ -178,22 +196,59 @@ class InstrumentGCSUploader:
         
         logger.info(f"Validating {len(df)} instrument definitions against Pydantic model")
         
-        for idx, row in df.iterrows():
-            try:
-                # Convert DataFrame row to dict
-                row_dict = row.to_dict()
-                
-                # Create InstrumentDefinition instance (this will validate)
-                instrument = InstrumentDefinition.from_dict(row_dict)
-                
-                # Check for missing required fields
-                missing_fields = instrument.validate_required_fields()
-                if missing_fields:
-                    errors.append(f"Row {idx} ({row_dict.get('instrument_key', 'unknown')}): Missing required fields: {missing_fields}")
-                
-            except Exception as e:
-                instrument_key = row_dict.get('instrument_key', f'row_{idx}')
-                errors.append(f"Row {idx} ({instrument_key}): Validation error - {str(e)}")
+        # Set up warning capture for the models logger
+        models_logger = logging.getLogger('src.models')
+        warning_handler = WarningCaptureHandler()
+        warning_handler.setLevel(logging.WARNING)
+        warning_handler.setFormatter(logging.Formatter('%(message)s'))
+        
+        # Add handler temporarily
+        models_logger.addHandler(warning_handler)
+        models_logger.setLevel(logging.WARNING)
+        
+        try:
+            for idx, row in df.iterrows():
+                try:
+                    # Clear warnings from previous validation
+                    warning_handler.clear_warnings()
+                    
+                    # Convert DataFrame row to dict
+                    row_dict = row.to_dict()
+                    instrument_key = row_dict.get('instrument_key', f'row_{idx}')
+                    
+                    # Create InstrumentDefinition instance (this will validate)
+                    instrument = InstrumentDefinition.from_dict(row_dict)
+                    
+                    # Capture warnings from this validation
+                    validation_warnings = warning_handler.get_warnings()
+                    for warning in validation_warnings:
+                        warnings.append(f"Row {idx} ({instrument_key}): {warning}")
+                    
+                    # Check for missing required fields
+                    missing_fields = instrument.validate_required_fields()
+                    if missing_fields:
+                        errors.append(f"Row {idx} ({instrument_key}): Missing required fields: {missing_fields}")
+                    
+                except ValidationError as e:
+                    # Handle Pydantic validation errors with detailed field information
+                    instrument_key = row_dict.get('instrument_key', f'row_{idx}')
+                    error_details = []
+                    for error in e.errors():
+                        field = error.get('loc', ['unknown'])[-1] if error.get('loc') else 'unknown'
+                        msg = error.get('msg', 'validation error')
+                        input_value = error.get('input', 'N/A')
+                        error_details.append(f"{field}: {msg} (value: {input_value})")
+                    
+                    errors.append(f"Row {idx} ({instrument_key}): Pydantic validation failed - {'; '.join(error_details)}")
+                    
+                except Exception as e:
+                    # Handle other exceptions
+                    instrument_key = row_dict.get('instrument_key', f'row_{idx}')
+                    errors.append(f"Row {idx} ({instrument_key}): Unexpected error - {str(e)}")
+        
+        finally:
+            # Remove the warning handler
+            models_logger.removeHandler(warning_handler)
         
         logger.info(f"Validation complete: {len(errors)} errors, {len(warnings)} warnings")
         

@@ -536,6 +536,8 @@ class InstrumentDefinition(BaseModel):
     ccxt_symbol: str = Field(default="", description="Symbol format for CCXT library")
     ccxt_exchange: str = Field(default="", description="Exchange identifier for CCXT library")
     
+    # Note: validation_warnings removed to avoid circular reference issues
+    
     @field_validator('instrument_key')
     @classmethod
     def validate_instrument_key(cls, v):
@@ -551,13 +553,15 @@ class InstrumentDefinition(BaseModel):
         venue = parts[0]
         valid_venues = [v.value for v in Venue]
         if venue not in valid_venues:
-            logger.warning(f"Unknown venue in instrument key: {venue}")
+            # Warning will be collected in model_validator
+            pass
         
         # Validate instrument type (second part)
         instrument_type = parts[1]
         valid_types = [t.value for t in InstrumentType]
         if instrument_type not in valid_types:
-            logger.warning(f"Unknown instrument type in instrument key: {instrument_type}")
+            # Warning will be collected in model_validator
+            pass
         
         return v
     
@@ -587,7 +591,8 @@ class InstrumentDefinition(BaseModel):
         
         for data_type in types:
             if data_type not in valid_data_types:
-                logger.warning(f"Unknown data type: {data_type}")
+                # Warning will be collected in model_validator
+                pass
         
         return v
     
@@ -639,6 +644,31 @@ class InstrumentDefinition(BaseModel):
     @model_validator(mode='after')
     def validate_instrument_consistency(self):
         """Validate overall instrument consistency"""
+        # Check instrument key components
+        if self.instrument_key and ':' in self.instrument_key:
+            parts = self.instrument_key.split(':')
+            if len(parts) >= 2:
+                venue = parts[0]
+                instrument_type = parts[1]
+                
+                # Check venue
+                valid_venues = [v.value for v in Venue]
+                if venue not in valid_venues:
+                    logger.warning(f"Unknown venue in instrument key: {venue}")
+                
+                # Check instrument type
+                valid_types = [t.value for t in InstrumentType]
+                if instrument_type not in valid_types:
+                    logger.warning(f"Unknown instrument type in instrument key: {instrument_type}")
+        
+        # Check data types
+        if self.data_types:
+            valid_data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'options_chain', 'liquidations']
+            types = [t.strip() for t in self.data_types.split(',')]
+            for data_type in types:
+                if data_type not in valid_data_types:
+                    logger.warning(f"Unknown data type: {data_type}")
+        
         # Futures and options should have expiry
         if self.instrument_type in ['FUTURE', 'OPTION'] and not self.expiry:
             logger.warning(f"Futures/options should have expiry: {self.instrument_key}")
@@ -664,7 +694,7 @@ class InstrumentDefinition(BaseModel):
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for DataFrame creation"""
-        return self.dict()
+        return self.model_dump()
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'InstrumentDefinition':
