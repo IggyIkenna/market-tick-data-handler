@@ -186,10 +186,17 @@ class DataValidator:
             for data_type in data_types:
                 available_data = self._get_available_data_by_type(current_date, data_type, venues, instrument_types)
                 
-                # Only check instruments that should have this data type
-                instruments_with_data_type = expected_instruments_df[
-                    expected_instruments_df['data_types'].str.contains(data_type, na=False)
-                ]['instrument_key'].tolist()
+                # Only check instruments that should have this data type using exact matching
+                # Parse comma-separated data types and check for exact matches
+                instruments_with_data_type = []
+                for _, row in expected_instruments_df.iterrows():
+                    if pd.notna(row['data_types']):
+                        # Split comma-separated data types and strip whitespace
+                        instrument_data_types = [dt.strip() for dt in str(row['data_types']).split(',')]
+                        if data_type in instrument_data_types:
+                            instruments_with_data_type.append(row['instrument_key'])
+                
+                logger.info(f"Checking {data_type}: {len(instruments_with_data_type)} instruments expected, {len(available_data)} available")
                 
                 # Find missing data for this type
                 missing = self._find_missing_data_by_type(instruments_with_data_type, available_data, current_date, data_type)
