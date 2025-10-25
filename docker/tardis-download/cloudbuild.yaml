@@ -1,0 +1,36 @@
+# Google Cloud Build configuration for building optimized AMD64 Docker images
+# This configuration builds and pushes the latest Docker image with all optimizations
+
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'build'
+  - '--platform=linux/amd64'
+  - '-f'
+  - 'docker/tardis-download/Dockerfile.amd64'
+  - '-t'
+  - 'asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-tardis-downloader:latest'
+  - '-t'
+  - 'asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-tardis-downloader:optimized'
+  - '.'
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'push'
+  - 'asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-tardis-downloader:latest'
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'push'
+  - 'asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-tardis-downloader:optimized'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
+
+# Usage:
+# gcloud beta builds submit --config docker/tardis-download/cloudbuild.yaml .
+# 
+# This will:
+# 1. Build the Docker image for AMD64 architecture 
+# 2. Include all latest code changes and optimizations
+# 3. Push with both 'latest' and 'optimized' tags
+# 4. Use dummy service account file (VMs use default service account)

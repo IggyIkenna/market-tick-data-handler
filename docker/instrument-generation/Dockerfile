@@ -66,4 +66,4 @@ RUN useradd -m -s /bin/bash tickdata && \
 USER tickdata
 
 # Default command - run instrument generation using main.py
-CMD ["python", "-m", "src.main", "--mode", "instruments", "--start-date", "2023-05-23", "--end-date", "2023-05-25"]
+CMD ["python", "-m", "market_data_tick_handler.main.", "--mode", "instruments", "--start-date", "2023-05-23", "--end-date", "2023-05-25"]

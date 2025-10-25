@@ -1,7 +1,7 @@
 # Market Data Tick Handler - Setup Guide
 
-**Version**: 1.0.0  
-**Last Updated**: January 15, 2025
+**Version**: 2.0.0 (Refactored Package Architecture)  
+**Last Updated**: December 2024
 
 ## Table of Contents
 
@@ -9,10 +9,12 @@
 2. [Installation](#installation)
 3. [Configuration](#configuration)
 4. [Local Development](#local-development)
-5. [Docker Setup](#docker-setup)
-6. [VM Deployment](#vm-deployment)
-7. [Verification](#verification)
-8. [Troubleshooting](#troubleshooting)
+5. [Package Usage](#package-usage)
+6. [Live Streaming Setup](#live-streaming-setup)
+7. [Docker Setup](#docker-setup)
+8. [VM Deployment](#vm-deployment)
+9. [Verification](#verification)
+10. [Troubleshooting](#troubleshooting)
 
 ## Prerequisites
 
@@ -177,30 +179,92 @@ market-tick-data-handler/
 └── .env                              # Environment variables
 ```
 
-### 2. Running the Service
+### 2. Complete Data Pipeline
+
+The system follows a comprehensive data pipeline from raw tick data to processed features:
+
+#### VM Deployment Pipeline (Scheduled Daily at 8 AM UTC)
+
+```bash
+# 1. Generate instrument definitions
+python -m market_data_tick_handler.main. --mode instruments --start-date 2023-05-23 --end-date 2023-05-23
+
+# 2. Generate missing data reports
+python -m market_data_tick_handler.main. --mode missing-tick-reports --start-date 2023-05-23 --end-date 2023-05-23
+
+# 3. Download missing tick data (default mode)
+python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues binance
+
+# 4. Process candles with HFT features
+python -m market_data_tick_handler.main. --mode candle-processing --start-date 2023-05-23 --end-date 2023-05-23
+
+# 5. Upload candles to BigQuery
+python -m market_data_tick_handler.main. --mode bigquery-upload --start-date 2023-05-23 --end-date 2023-05-23
+
+# 6. Process MFT features
+python -m market_data_tick_handler.main. --mode mft-processing --start-date 2023-05-23 --end-date 2023-05-23
+```
+
+#### Data Storage Architecture
+
+- **GCS Storage**:
+  - Raw tick data (optimized Parquet with timestamp partitioning)
+  - Processed candles (15s, 1m, 5m, 15m, 1h, 4h, 24h timeframes)
+  - MFT features (1m+ timeframes)
+  - Instrument definitions
+
+- **BigQuery Storage**:
+  - Candles with HFT features (one table per timeframe)
+  - Real-time streaming data
+
+- **Package Usage**:
+  - Features service imports package to query BigQuery
+  - Gets candle data with HFT features
+  - Processes additional MFT features
+  - Pushes features to GCS for backtesting
+
+### 3. Running the Service
 
 #### Using the Main Entry Point
 ```bash
+# Check for missing instrument definitions
+python -m market_data_tick_handler.main. --mode check-gaps --start-date 2023-05-23 --end-date 2023-05-25
+
 # Generate instrument definitions
-python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
+python -m market_data_tick_handler.main. --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
 
-# Download tick data
-python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
+# Generate missing data reports
+python -m market_data_tick_handler.main. --mode missing-tick-reports --start-date 2023-05-23 --end-date 2023-05-25
 
-# Validate data
-python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
+# Download only missing data (default mode)
+python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
 
-# Run full pipeline (instruments → download → validate)
-python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+# Force download all data (overrides missing data check)
+python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit --force
+
+# Validate data completeness
+python -m market_data_tick_handler.main. --mode validate --start-date 2023-05-23 --end-date 2023-05-25
+
+# Run full pipeline (check-gaps → instruments → missing-tick-reports → download → validate)
+python -m market_data_tick_handler.main. --mode full-pipeline-ticks --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 #### Using Convenience Scripts
 ```bash
-# Use the convenience script for all operations
+# Batch processing operations
+./deploy/local/run-main.sh check-gaps --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh missing-tick-reports --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25 --force
+./deploy/local/run-main.sh candle-processing --start-date 2024-01-01 --end-date 2024-01-01
+./deploy/local/run-main.sh bigquery-upload --start-date 2024-01-01 --end-date 2024-01-01
 ./deploy/local/run-main.sh validate --start-date 2023-05-23 --end-date 2023-05-25
-./deploy/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh full-pipeline-ticks --start-date 2023-05-23 --end-date 2023-05-25
+
+# Live streaming operations
+./deploy/local/run-main.sh streaming-ticks --symbol BTC-USDT
+./deploy/local/run-main.sh streaming-candles --symbol BTC-USDT,ETH-USDT
 ```
 
 ### 3. Development Tools
@@ -228,6 +292,134 @@ pytest tests/test_tardis_connector.py
 
 # Run with coverage
 pytest --cov=market_data_tick_handler --cov-report=html
+```
+
+## Package Usage
+
+The Market Data Handler can be used as a package/library by downstream services:
+
+### 1. Install as Package
+
+```bash
+# Install in development mode
+pip install -e .
+
+# Or add to requirements.txt
+git+https://github.com/your-org/market-tick-data-handler.git
+```
+
+### 2. Basic Usage
+
+```python
+from src.data_client import DataClient, CandleDataReader, TickDataReader
+from config import get_config
+from datetime import datetime, timezone
+
+# Initialize
+config = get_config()
+data_client = DataClient(config.gcp.bucket, config)
+
+# Read candles
+candle_reader = CandleDataReader(data_client)
+candles = candle_reader.get_candles(
+    instrument_id="BINANCE:SPOT_PAIR:BTC-USDT",
+    timeframe="1m",
+    start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    end_date=datetime(2024, 1, 2, tzinfo=timezone.utc)
+)
+
+# Read tick data with filtering
+tick_reader = TickDataReader(data_client)
+ticks = tick_reader.get_tick_data(
+    instrument_id="BINANCE:SPOT_PAIR:BTC-USDT",
+    start_time=datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+    end_time=datetime(2024, 1, 1, 12, 5, 0, tzinfo=timezone.utc),
+    date=datetime(2024, 1, 1).date()
+)
+```
+
+### 3. Use Cases
+
+#### Features Service
+```python
+# Get 1m candles for feature calculation
+candles = candle_reader.get_candles(
+    instrument_id="BINANCE:SPOT_PAIR:BTC-USDT",
+    timeframe="1m",
+    start_date=start_date,
+    end_date=end_date
+)
+```
+
+#### Execution Service
+```python
+# Get 15s candles with HFT features
+candles = candle_reader.get_candles(
+    instrument_id="BINANCE:SPOT_PAIR:BTC-USDT",
+    timeframe="15s",
+    start_date=start_date,
+    end_date=end_date
+)
+```
+
+#### Backtesting
+```python
+# Get tick data for specific time range
+ticks = tick_reader.get_tick_data(
+    instrument_id="BINANCE:SPOT_PAIR:BTC-USDT",
+    start_time=start_time,
+    end_time=end_time,
+    date=date
+)
+```
+
+## Live Streaming Setup
+
+### 1. Node.js Requirements
+
+```bash
+# Install Node.js (version 18 or higher)
+curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# Verify installation
+node --version
+npm --version
+```
+
+### 2. Install Dependencies
+
+```bash
+# Navigate to Node.js streaming directory
+cd live_streaming/nodejs
+
+# Install dependencies
+npm install
+```
+
+### 3. Configure Environment
+
+```bash
+# Set your Tardis API key
+export TARDIS_API_KEY="TD.your_api_key_here"
+
+# Set GCP credentials
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-key.json"
+export GCP_PROJECT_ID="your-gcp-project-id"
+```
+
+### 4. Run Streaming Services
+
+```bash
+# Stream raw ticks to BigQuery
+node live_tick_streamer.js --mode ticks --symbol BTC-USDT
+
+# Stream real-time candles with HFT features
+node live_tick_streamer.js --mode candles --symbol BTC-USDT,ETH-USDT
+
+# Or use the convenience script
+./deploy/local/run-main.sh streaming-ticks --symbol BTC-USDT
+./deploy/local/run-main.sh streaming-candles --symbol BTC-USDT,ETH-USDT
 ```
 
 ## Docker Setup
@@ -392,8 +584,11 @@ Expected output:
 ### 3. Test Data Download
 
 ```bash
-# Download sample data
-python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues deribit --max-instruments 5
+# Download sample data (missing data mode)
+python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues deribit --max-instruments 5
+
+# Force download sample data
+python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues deribit --max-instruments 5 --force
 
 # Verify data in GCS
 gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/
@@ -403,10 +598,10 @@ gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/
 
 ```bash
 # Run validation
-python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-23
+python -m market_data_tick_handler.main. --mode validate --start-date 2023-05-23 --end-date 2023-05-23
 
 # Run complete pipeline
-python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-23 --max-instruments 5
+python -m market_data_tick_handler.main. --mode full-pipeline-ticks --start-date 2023-05-23 --end-date 2023-05-23 --max-instruments 5
 
 # Verify all data types
 gsutil ls gs://market-data-tick/instrument_availability/by_date/day-2023-05-23/

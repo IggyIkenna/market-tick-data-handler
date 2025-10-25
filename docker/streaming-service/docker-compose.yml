@@ -1,0 +1,107 @@
+version: '3.8'
+
+services:
+  # Raw tick streaming to BigQuery (Mode 1)
+  tick-streamer:
+    build:
+      context: ../../
+      dockerfile: docker/streaming-service/Dockerfile
+    container_name: market-tick-streamer
+    environment:
+      - TARDIS_API_KEY=${TARDIS_API_KEY}
+      - STREAMING_MODE=ticks
+      - STREAMING_SYMBOL=${STREAMING_SYMBOL:-BTC-USDT}
+      - STREAMING_EXCHANGE=${STREAMING_EXCHANGE:-binance}
+      - STREAMING_DURATION=${STREAMING_DURATION:-3600}
+      - BIGQUERY_DATASET=${BIGQUERY_DATASET:-market_data_streaming}
+      - BIGQUERY_TABLE=${BIGQUERY_TABLE}
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/service-account.json:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/service-account.json
+    restart: unless-stopped
+    profiles: ["ticks"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Multi-timeframe candle processor (Mode 2)
+  candle-processor:
+    build:
+      context: ../../
+      dockerfile: docker/streaming-service/Dockerfile
+    container_name: market-candle-processor
+    environment:
+      - TARDIS_API_KEY=${TARDIS_API_KEY}
+      - STREAMING_MODE=candles
+      - STREAMING_SYMBOL=${STREAMING_SYMBOL:-BTC-USDT}
+      - STREAMING_EXCHANGE=${STREAMING_EXCHANGE:-binance}
+      - STREAMING_DURATION=${STREAMING_DURATION:-3600}
+      - STREAMING_TIMEFRAMES=${STREAMING_TIMEFRAMES:-15s,1m,5m,15m,4h,24h}
+      - ENABLE_HFT_FEATURES=${ENABLE_HFT_FEATURES:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    restart: unless-stopped
+    profiles: ["candles"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Node.js real-time streamer (Alternative)
+  nodejs-streamer:
+    build:
+      context: ../../
+      dockerfile: docker/streaming-service/Dockerfile
+    container_name: market-nodejs-streamer
+    environment:
+      - TARDIS_API_KEY=${TARDIS_API_KEY}
+      - USE_NODEJS_STREAMING=true
+      - STREAMING_SYMBOL=${STREAMING_SYMBOL:-BTC-USDT}
+      - STREAMING_DURATION=${STREAMING_DURATION:-3600}
+      - NODE_ENV=production
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    profiles: ["nodejs"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Monitoring dashboard
+  monitoring:
+    image: nginx:alpine
+    container_name: market-monitoring
+    ports:
+      - "8080:80"
+    volumes:
+      - ./monitoring/index.html:/usr/share/nginx/html/index.html:ro
+      - ./logs:/usr/share/nginx/html/logs:ro
+    depends_on:
+      - tick-streamer
+      - candle-processor
+    profiles: ["monitoring"]
+    restart: unless-stopped
+
+networks:
+  default:
+    name: market-data-streaming
+
+volumes:
+  logs:
+    driver: local
+  data:
+    driver: local

@@ -5,19 +5,30 @@
 - Enable unified routing, caching, and historical lifecycle snapshots.
 
 ### Canonical Key
-- Format: VENUE:INSTRUMENT_TYPE:BASE_ASSET/QUOTE_ASSET-YYMMDD-STRIKE-OPTION_TYPE
+- Format: VENUE:INSTRUMENT_TYPE:BASE_ASSET-QUOTE_ASSET-YYMMDD-STRIKE-OPTION_TYPE
 - All components are UPPERCASE for consistency and readability
 - Components:
   - VENUE: enum from existing `Venue` model (e.g., BINANCE, BINANCE-FUTURES, BYBIT, BYBIT-SPOT, OKX, OKX-FUTURES, OKX-SWAP, DERIBIT, AAVE_V3, ETHERFI, LIDO, WALLET, CME, NASDAQ)
-  - INSTRUMENT_TYPE: enum: [BASETOKEN, SPOT_PAIR, SPOTASSET, PERPETUAL, FUTURE, OPTION, EQUITY, INDEX, LST, A_TOKEN, DEBT_TOKEN]
+  - INSTRUMENT_TYPE: enum: [SPOT_ASSET, SPOT_PAIR, PERP, PERPETUAL, FUTURE, OPTION, EQUITY, INDEX, LST, A_TOKEN, DEBT_TOKEN]
   - SYMBOL: string (venue-normalized symbol with specific formats per type)
 
 ### Symbol Formats by Instrument Type: **
 - **SPOT_ASSET**: actual BASE_ASSET positions held on a specific venue (e.g., BTC, ETH, USDT)
 - **SPOT_PAIR**: BASE_ASSET-QUOTE_ASSET (e.g., BTC-USDT) - routing pair for spot trading
-- **PERPETUAL**: BASE_ASSET-QUOTE_ASSET (e.g., ETH-USDT)
+- **PERP/PERPETUAL**: BASE_ASSET-QUOTE_ASSET (e.g., ETH-USDT) - PERP is the alias used in code generation
 - **FUTURE**: BASE_ASSET-QUOTE_ASSET-YYMMDD (e.g., BTC-USD-241225)
 - **OPTION**: BASE_ASSET-QUOTE_ASSET-YYMMDD-STRIKE-OPTION_TYPE (e.g., BTC-USD-241225-50000-CALL)
+
+### Symbol Format Convention
+The symbol string includes all identifying components (e.g., `BTC-USD-241225-50000-CALL` for options).
+The InstrumentKey dataclass parses the symbol but also stores expiry, strike, and option_type as separate fields for query convenience.
+The format is always `VENUE:TYPE:SYMBOL` where SYMBOL itself contains all components.
+
+**Example:** `DERIBIT:OPTION:BTC-USD-241225-50000-CALL`
+- symbol = `BTC-USD-241225-50000-CALL`
+- expiry = `241225` (stored separately)
+- strike = `50000` (stored separately)  
+- option_type = `CALL` (stored separately)
 ** For DeFi Venues like AAVE_V3, ETHERFI, LIDO, there are addiitonal instrument types :LST, A_TOKEN, DEBT_TOKEN
 ** For TradFi Venues like CME, NASDAQ, there are addiitonal instrument types: EQUITY, INDEX
 
@@ -28,7 +39,8 @@
 - Spot routing (optional, never stored as a position):
   - BINANCE:SPOT_PAIR:BTC-USDT
 - Perpetuals:
-  - BYBIT:PERPETUAL:ETH-USDT
+  - BYBIT:PERP:ETH-USDT
+  - DERIBIT:PERPETUAL:BTC-USDT
 - Futures (unified across crypto and tradfi):
   - DERIBIT:FUTURE:BTC-USD-241225
   - CME:FUTURE:ES-202412
@@ -124,10 +136,10 @@
 - Daily snapshots store attrs.expiry; an auxiliary expiry_calendar lists exact intra-day expiries per day.
 
 ### FAQ
-- Why SPOT_PAIR is routing-only? Trades result in SPOTASSET deltas; SPOT_PAIR simplifies execution routing without becoming a held position.
-- What's the difference between BASETOKEN and SPOTASSET? BASETOKEN is a generic asset reference, SPOTASSET represents actual spot positions held on a specific venue.
+- Why SPOT_PAIR is routing-only? Trades result in SPOT_ASSET deltas; SPOT_PAIR simplifies execution routing without becoming a held position.
+- What's the difference between SPOT_ASSET and SPOT_PAIR? SPOT_ASSET represents actual spot positions held on a specific venue, SPOT_PAIR is used for routing and execution.
 - Are CME futures different from crypto futures? Same instrument_type=FUTURE; differences live in attributes (contract_size, codes, settlement, asset_class).
 - Why UPPERCASE? Consistent formatting makes keys more readable and easier to parse programmatically.
-- How do SPOT_PAIR and SPOTASSET work together? SPOT_PAIR is used for finding the best exchange to trade a pair, SPOTASSET tracks your actual asset holdings after the trade.
+- How do SPOT_PAIR and SPOT_ASSET work together? SPOT_PAIR is used for finding the best exchange to trade a pair, SPOT_ASSET tracks your actual asset holdings after the trade.
 
 

@@ -1,0 +1,55 @@
+# Include documentation
+include README.md
+include LICENSE
+include requirements.txt
+include streaming.env.example
+
+# Include configuration files
+include env.example
+include pytest.ini
+
+# Include streaming service files
+recursive-include streaming *.js
+recursive-include streaming *.json
+recursive-include streaming *.md
+
+# Include documentation
+recursive-include docs *.md
+
+# Include examples
+recursive-include examples *.py
+recursive-include examples *.md
+
+# Include scripts
+recursive-include scripts *.sh
+
+# Include deployment files
+recursive-include deploy *.sh
+recursive-include deploy *.md
+
+# Exclude unnecessary files
+exclude .gitignore
+exclude .gitattributes
+exclude .github/*
+exclude *.log
+exclude *.tmp
+exclude __pycache__/*
+recursive-exclude * __pycache__
+recursive-exclude * *.pyc
+recursive-exclude * *.pyo
+recursive-exclude * .DS_Store
+recursive-exclude * .pytest_cache
+recursive-exclude * .mypy_cache
+recursive-exclude * .coverage
+recursive-exclude * htmlcov
+recursive-exclude * .tox
+recursive-exclude * .venv
+recursive-exclude * venv*
+recursive-exclude * node_modules
+recursive-exclude * .env
+recursive-exclude * *.json
+recursive-exclude * *.parquet
+recursive-exclude * data/*
+recursive-exclude * logs/*
+recursive-exclude * temp/*
+recursive-exclude * downloads/*

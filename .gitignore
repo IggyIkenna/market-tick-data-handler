@@ -43,6 +43,9 @@ venv.bak/
 *.swo
 *~
 
+# VS Code settings
+settings.json
+
 # OS
 .DS_Store
 .DS_Store?
@@ -63,6 +66,27 @@ logs/
 !env.example
 !requirements.txt
 
+# Ephemeral files (removed during cleanup)
+check_missing_data.py
+create_full_aggregate.py
+data_analysis_report.py
+run_fixed_local_instrument_generation.py
+run_missing_data_report.py
+monitor_memory.py
+processing_analysis.py
+test_gcs_connection.py
+test_setup.py
+
+# Log files
+query_api.log
+comprehensive_test_results.log
+
+# Old data files (now handled by GCS)
+instruments
+instruments.json
+lookup_instruments.json
+data_analysis_report_*.json
+
 # Credentials
 *.json
 !requirements.txt
@@ -73,6 +97,43 @@ logs/
 # Cursor
 .cursor/
 
+# Package distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+*.whl
+*.tar.gz
+
+# Python package files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -80,8 +141,18 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+tests/.pytest_cache/
+tests/htmlcov/
+tests/.coverage
+tests/performance_metrics_*.json
 
 # mypy
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Node.js
+node_modules/
+
+# Performance metrics
+performance_metrics_*.json

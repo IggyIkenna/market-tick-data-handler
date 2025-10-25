@@ -14,50 +14,63 @@ This guide covers the complete deployment process for downloading Tardis tick da
 
 ## Quick Start
 
-### 1. Setup IAM Permissions
+### 1. Build and Push Docker Images
 
 ```bash
-# Run the IAM setup script
-./orchestration/setup-iam.sh
+# Build and push Docker images
+./deploy/vm/build-images.sh build-and-push --tag v1.0.0
 ```
 
-This will add the following permissions to the service account:
-- `roles/storage.objectAdmin`: GCS upload/download/delete
-- `roles/artifactregistry.reader`: Docker image pull
-- `roles/compute.instanceAdmin`: VM management
-
-### 2. Build and Push Docker Image
+### 2. Deploy VMs for Instrument Generation
 
 ```bash
-# Build and push the Docker image
-gcloud builds submit --config orchestration/cloudbuild.yaml
+# Deploy single VM for instrument generation
+./deploy/vm/deploy-instruments.sh deploy
+
+# Run instrument generation
+./deploy/vm/deploy-instruments.sh run --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### 3. Deploy VMs for Data Download
 
 ```bash
-# Download 2023-05-23 data
-./orchestration/orchestrate-tick-download.sh --date 2023-05-23
+# Deploy single VM for data download
+./deploy/vm/deploy-tardis.sh deploy
 
-# Download 2025-10-20 data
-./orchestration/orchestrate-tick-download.sh --date 2025-10-20
+# Run data download
+./deploy/vm/deploy-tardis.sh run --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
 ```
 
-### 4. Monitor Progress
+### 4. Deploy Multiple VMs for Production
 
 ```bash
-# Interactive monitoring
-./orchestration/monitor-tick-download.sh
-
-# Command line monitoring
-./orchestration/monitor-tick-download.sh all 2023-05-23
+# Deploy multiple VMs with sharding
+./deploy/vm/shard-deploy.sh instruments --start-date 2023-05-23 --end-date 2023-05-25 --shards 10
+./deploy/vm/shard-deploy.sh tardis --start-date 2023-05-23 --end-date 2023-05-25 --shards 20
 ```
 
-### 5. Cleanup
+### 5. Monitor Progress
 
 ```bash
-# Clean up VMs after completion
-./orchestration/cleanup-tick-vms.sh
+# Check VM status
+gcloud compute instances list --filter="name~tick-data-vm"
+
+# Check specific VM logs
+gcloud compute instances get-serial-port-output VM_NAME --zone=asia-northeast1-c
+
+# Monitor GCS uploads
+gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/
+```
+
+### 6. Cleanup
+
+```bash
+# Clean up all sharded VMs
+./deploy/vm/shard-deploy.sh cleanup
+
+# Or clean up individual VMs
+./deploy/vm/deploy-instruments.sh delete
+./deploy/vm/deploy-tardis.sh delete
 ```
 
 ## Detailed Setup
@@ -115,11 +128,13 @@ gcloud builds submit --config orchestration/cloudbuild.yaml
 ## Architecture
 
 ### VM Configuration
-- **Machine Type**: `e2-highmem-2` (2 vCPU, 16GB RAM)
+- **Machine Type**: `e2-highmem-8` (8 vCPU, 64GB RAM) for Tardis download
+- **Workers**: 2 (leaving 2 vCPUs for system operations)
 - **Disk Size**: 100GB pd-standard
 - **Image**: ubuntu-2204-lts
 - **Preemptible**: Yes (for cost savings)
 - **Zone**: asia-northeast1-a
+- **Rationale**: 64GB memory allows parallel processing of large parquet files
 
 ### Sharding Strategy
 - **60 VMs**: 1 instrument per VM
@@ -254,5 +269,5 @@ For issues or questions:
 - `deploy/vm/deploy-tardis.sh`: Single VM data download deployment
 - `deploy/vm/build-images.sh`: Docker image build and push
 - `deploy/local/run-main.sh`: Local execution convenience script
-- `src/main.py`: Main entry point with four modes (instruments, download, validate, full-pipeline)
+- `src/main.py`: Main entry point with four modes (instruments, download, validate, full-pipeline-ticks)
 - `src/data_validator/data_validator.py`: Data validation functionality

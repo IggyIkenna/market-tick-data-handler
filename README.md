@@ -1,64 +1,242 @@
 # Market Tick Data Handler
 
-A high-performance system for downloading, processing, and storing cryptocurrency tick data from Tardis.dev into Google Cloud Storage.
+A high-performance system for downloading, processing, and storing cryptocurrency tick data from Tardis.dev into Google Cloud Storage. Now refactored as a clean internal package/library for downstream services.
 
-## 🚀 Quick Start
+## 🚀 Quick Installation
+
+### For External Users (Recommended)
+```bash
+# One-command installation with all dependencies
+curl -sSL https://raw.githubusercontent.com/iggyikenna/market-tick-data-handler/main/install.sh | bash
+
+# Or clone and install locally
+git clone https://github.com/iggyikenna/market-tick-data-handler.git
+cd market-tick-data-handler
+./install.sh --local
+```
+
+### For Developers (No GCP Required)
+```bash
+# 1. Clone and setup
+git clone https://github.com/iggyikenna/market-tick-data-handler.git
+cd market-tick-data-handler
+pip install -e .
+
+# 2. Choose "Mock Data Mode" for testing without GCP
+# 3. Run performance test
+python examples/standalone_performance_test.py
+```
+
+### For Production (With GCP Access)
+```bash
+# 1. Clone and setup
+git clone https://github.com/iggyikenna/market-tick-data-handler.git
+cd market-tick-data-handler
+pip install -e .
+
+# 2. Choose "Restore Credentials" or use your own
+# 3. Run real data test
+python examples/performance_comparison_test.py
+```
+
+### Package Installation (For Downstream Services)
+```bash
+# Install as Python package from GitHub (recommended)
+pip install git+https://github.com/iggyikenna/market-tick-data-handler.git
+
+# Or install in development mode
+git clone https://github.com/iggyikenna/market-tick-data-handler.git
+cd market-tick-data-handler
+pip install -e .
+
+# Install with development dependencies
+pip install -e .[dev]
+
+# Install with streaming capabilities
+pip install -e .[streaming]
+
+# Install everything
+pip install -e .[dev,streaming]
+```
+
+See [Package Installation Guide](PACKAGE_INSTALLATION.md) for detailed instructions.
 
 ### Prerequisites
-- Python 3.11+
-- Google Cloud SDK
-- Docker
-- Tardis.dev API key
+- Python 3.8+ (3.11+ recommended)
+- Google Cloud SDK (for production)
+- Docker (optional)
+- Tardis.dev API key (stored in Google Cloud Secret Manager)
+- Git access to this private repository
 
-### Installation
+### Local Development Installation
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd market-tick-data-handler
 
-# Install dependencies
-pip install -r requirements.txt
+# Run automated setup
+./scripts/setup-dev.sh
 
-# Set up environment
+# Or manual setup
+pip install -r requirements.txt
 cp env.example .env
 # Edit .env with your API keys and configuration
 ```
 
 ### Quick Test
 ```bash
-# Test with instrument generation
-python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-23
+# Test with mock data (no GCP required)
+python examples/standalone_performance_test.py
+
+# Test with real data (requires GCP)
+python examples/performance_comparison_test.py
 
 # Test with data download
-python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues deribit --max-instruments 5
+python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-23 --venues deribit --max-instruments 5
+
+# Inspect instrument definitions
+python examples/inspect_instrument.py BINANCE-FUTURES:PERPETUAL:SOL-USDT
 ```
+
+### Authentication Setup
+The package supports multiple authentication modes for different use cases:
+
+```bash
+# Production (Secret Manager + GCS)
+./scripts/setup-auth.sh production your-project market-data-prod
+
+# Development (Environment variables + GCS)
+./scripts/setup-auth.sh development your-dev-project market-data-dev
+
+# Read-only (GCS only)
+./scripts/setup-auth.sh readonly your-project market-data-readonly
+
+# Mock/Offline (No GCP access)
+./scripts/setup-auth.sh mock
+```
+
+See [Authentication Strategy](docs/AUTHENTICATION_STRATEGY.md) for detailed setup instructions.
+
+### Sparse Data Access for Backtesting
+The package includes optimized Parquet reading for sparse data access:
+
+```python
+# Get data for specific candle times only (e.g., every 5-20 candles)
+candle_times = [
+    datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+    datetime(2024, 1, 1, 12, 15, 0, tzinfo=timezone.utc),
+    # ... more specific times
+]
+
+sparse_data = tick_reader.get_sparse_candles(
+    instrument_id="BINANCE:SPOT_PAIR:BTC-USDT",
+    candle_times=candle_times,
+    date=datetime(2024, 1, 1, tzinfo=timezone.utc).date(),
+    buffer_minutes=2
+)
+```
+
+**Benefits**:
+- **95-98% reduction** in data transfer for sparse queries
+- **10x faster** loading for backtesting scenarios
+- **90% less memory** usage for large datasets
+
+See [Parquet Optimization Strategy](docs/PARQUET_OPTIMIZATION_STRATEGY.md) for technical details.
 
 ## 🎯 Core Operations
 
-The system provides three main operations through a centralized entry point:
+The system provides multiple operations through a centralized entry point:
 
-### 1. Instrument Generation
+### Package/Library Usage
+The system can be used as a package for downstream services:
+
+#### Historical Data Access
+```python
+from src.data_client import DataClient, CandleDataReader
+from config import get_config
+
+# Initialize
+config = get_config()
+data_client = DataClient(config.gcp.bucket, config)
+candle_reader = CandleDataReader(data_client)
+
+# Read 1m candles
+candles = candle_reader.get_candles(
+    instrument_id="BINANCE:SPOT_PAIR:BTC-USDT",
+    timeframe="1m",
+    start_date=datetime(2024, 1, 1, tzinfo=timezone.utc),
+    end_date=datetime(2024, 1, 2, tzinfo=timezone.utc)
+)
+```
+
+#### Real-Time Streaming
+```bash
+# Stream raw tick data to BigQuery
+python -m market_data_tick_handler.main. --mode streaming-ticks --symbol BTC-USDT --duration 300
+
+# Stream real-time candles with HFT features
+python -m market_data_tick_handler.main. --mode streaming-candles --symbol BTC-USDT --duration 0
+```
+
+See [Package Usage Guide](docs/PACKAGE_USAGE.md) for detailed examples.
+
+## 🏗️ Architecture
+
+The system has been refactored into a clean package/library architecture:
+
+### Package Components
+- **`src/data_client/`**: Clean data access interfaces for reading processed data
+- **`src/candle_processor/`**: Historical and aggregated candle processing
+- **`src/bigquery_uploader/`**: BigQuery batch upload functionality
+- **`src/streaming_service/`**: Live streaming components (Node.js primary)
+
+### Use Cases
+1. **Features Service**: Gets 1m candles for feature calculation
+2. **Execution Deployment**: Gets 15s candles and HFT features for high-frequency trading
+3. **Analytics**: Streams tick data to BigQuery for analytics
+4. **Backtesting**: Efficient data retrieval for backtesting scenarios
+
+### Deployment Modes
+- **VM Deployments**: Batch processing jobs (instruments, downloads, candles, BigQuery uploads)
+- **Package Usage**: Direct import by downstream services
+- **Live Streaming**: Node.js services for real-time data processing
+
+### Batch Processing Operations
+
+#### 1. Instrument Generation
 Generate canonical instrument definitions and upload to GCS:
 ```bash
-python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
+python -m market_data_tick_handler.main. --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
-### 2. Data Download
+#### 2. Data Download
 Download tick data from Tardis and upload to GCS:
 ```bash
-python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
+python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
 ```
 
-### 3. Data Validation
+#### 3. Candle Processing
+Process historical tick data into candles with HFT features:
+```bash
+python -m market_data_tick_handler.main. --mode candle-processing --start-date 2024-01-01 --end-date 2024-01-01
+```
+
+#### 4. BigQuery Upload
+Upload processed candles to BigQuery for analytics:
+```bash
+python -m market_data_tick_handler.main. --mode bigquery-upload --start-date 2024-01-01 --end-date 2024-01-01
+```
+
+#### 5. Data Validation
 Validate data completeness and check for missing data:
 ```bash
-python -m src.main --mode validate --start-date 2023-05-23 --end-date 2023-05-25
+python -m market_data_tick_handler.main. --mode validate --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### 4. Full Pipeline
 Run complete workflow (instruments → download → validate):
 ```bash
-python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+python -m market_data_tick_handler.main. --mode full-pipeline-ticks --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ## 🚀 Deployment Options
@@ -69,7 +247,7 @@ python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-
 ./deploy/local/run-main.sh instruments --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh download --start-date 2023-05-23 --end-date 2023-05-25
 ./deploy/local/run-main.sh validate --start-date 2023-05-23 --end-date 2023-05-25
-./deploy/local/run-main.sh full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh full-pipeline-ticks --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### VM Deployment
@@ -104,11 +282,15 @@ gs://market-data-tick/
 
 ## 📚 Documentation
 
-- [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md) - Current system architecture
-- [Main Usage](docs/MAIN_USAGE.md) - Detailed usage instructions
-- [Quick Reference](docs/QUICK_REFERENCE.md) - Quick commands and structure
+- [Downstream Usage Guide](docs/DOWNSTREAM_USAGE.md) - **Primary guide for teams consuming this as a package/library**
+- [Secret Manager Setup](docs/SECRET_MANAGER_SETUP.md) - **Secure API key management with Google Cloud Secret Manager**
+- [Architecture Overview](docs/ARCHITECTURE.md) - System architecture details
+- [Authentication Strategy](docs/AUTHENTICATION_STRATEGY.md) - **Multi-tier authentication for different use cases**
 - [Setup Guide](docs/SETUP_GUIDE.md) - Complete setup instructions
 - [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) - VM deployment instructions
+- [Package Usage](docs/PACKAGE_USAGE.md) - Detailed API reference
+- [HFT Features Specification](docs/HFT_FEATURES_SPECIFICATION.md) - **Technical specification of high-frequency trading features**
+- [Parquet Optimization Strategy](docs/PARQUET_OPTIMIZATION_STRATEGY.md) - **Efficient sparse data access for backtesting**
 - [Instrument Key Specification](docs/INSTRUMENT_KEY.md) - Canonical instrument key format
 
 ## 🔧 Configuration
@@ -453,13 +635,28 @@ instruments = pd.read_parquet('instruments.parquet')
 ### Run Tests
 ```bash
 # Run all tests
-pytest test/
+pytest tests/
 
-# Run specific test
-pytest test/test_timestamp_consistency.py
+# Run specific test categories
+pytest tests/unit/ -v
+pytest tests/integration/ -v
+pytest tests/performance/ -v
 
 # Run with coverage
-pytest --cov=. test/
+pytest --cov=src tests/
+```
+
+### Quality Gates
+```bash
+# Run quality gates (used in deployment)
+python tests/run_quality_gates.py
+
+# Deploy with quality gates (blocks if tests fail)
+./deploy/local/run-main.sh [MODE] --run-quality-gates [OPTIONS]
+
+# Examples
+./deploy/local/run-main.sh check-gaps --run-quality-gates --start-date 2023-05-23 --end-date 2023-05-25
+./deploy/local/run-main.sh instruments --run-quality-gates --start-date 2023-05-23 --end-date 2023-05-25
 ```
 
 ### Test Scripts
@@ -474,6 +671,16 @@ python deploytest_basic.py
 python deploytest_comprehensive.py
 ```
 
+### Quality Gates Integration
+The system includes comprehensive quality gates that can be integrated into deployment:
+
+- **Optional**: Quality gates only run when `--run-quality-gates` flag is used
+- **Blocking**: Deployment is completely blocked if quality gates fail
+- **Comprehensive**: Includes dependency checks, environment validation, GCS connectivity, Tardis API validation, and test execution
+- **Clear Feedback**: Detailed output showing what's being checked and why deployment failed
+
+For detailed testing documentation, see [tests/README.md](tests/README.md).
+
 ## 📚 Documentation
 
 - **[Project Specification](docs/PROJECT_SPECIFICATION.md)**: Detailed project overview
@@ -482,6 +689,25 @@ python deploytest_comprehensive.py
 - **[Deployment Guide](docs/DEPLOYMENT_GUIDE.md)**: VM deployment and orchestration
 - **[API Reference](docs/API_REFERENCE.md)**: REST API documentation
 - **[Technical Reference](docs/TECHNICAL_REFERENCE.md)**: Architecture and implementation details
+
+## 🛠️ Examples
+
+The `examples/` directory contains utility scripts and examples:
+
+- **[inspect_instrument.py](examples/inspect_instrument.py)**: Command-line tool to inspect instrument definitions from GCS
+- **[examples/README.md](examples/README.md)**: Detailed documentation for example scripts
+
+### Quick Instrument Inspection
+```bash
+# Inspect any instrument by ID
+python examples/inspect_instrument.py BINANCE-FUTURES:PERPETUAL:SOL-USDT
+
+# Show summary of all instruments for a date
+python examples/inspect_instrument.py BINANCE:SPOT_PAIR:BTC-USDT --summary
+
+# Use different date
+python examples/inspect_instrument.py DERIBIT:OPTION:BTC-USD-241225-50000-CALL --date 2023-05-24
+```
 
 ## 🔧 Configuration
 
@@ -495,7 +721,14 @@ GCS_BUCKET=market-data-tick
 # Optional
 GCP_CREDENTIALS_PATH=path/to/credentials.json
 LOG_LEVEL=INFO
+DOWNLOAD_MAX_WORKERS=2        # 2 workers for Tardis download (leaves 2 vCPUs for system)
 ```
+
+### VM Configuration
+For production VM deployments:
+- **Machine Type**: `e2-highmem-8` (8 vCPU, 64GB RAM)
+- **Workers**: 2 (optimal for parallel downloads while reserving system resources)
+- **Memory**: 64GB allows parallel processing of large parquet files
 
 ### Instrument Configuration
 The system supports 60 instruments:

@@ -13,6 +13,14 @@ from pathlib import Path
 import logging
 from dotenv import load_dotenv
 
+# Import Secret Manager utilities
+try:
+    from src.utils.secret_manager import get_tardis_api_key, get_secret_config
+    SECRET_MANAGER_AVAILABLE = True
+except ImportError:
+    SECRET_MANAGER_AVAILABLE = False
+    logging.warning("Secret Manager utilities not available - falling back to environment variables")
+
 @dataclass
 class TardisConfig:
     """Tardis API configuration"""
@@ -22,6 +30,7 @@ class TardisConfig:
     max_retries: int = 3
     max_concurrent: int = 50
     max_parallel_uploads: int = 20
+    download_max_workers: int = 2  # 2 workers for VM deployment (leaving 2 vCPUs for system)
     rate_limit_per_vm: int = 1000000  # 1M calls per day per VM
     
     def __post_init__(self):
@@ -45,13 +54,18 @@ class TardisConfig:
         
         if self.max_concurrent <= 0:
             validation_errors.append(f"Max concurrent must be positive, got {self.max_concurrent}")
-        elif self.max_concurrent > 100:
+        elif self.max_concurrent > 1000:
             validation_errors.append(f"Max concurrent seems too high ({self.max_concurrent}), consider reducing to avoid rate limiting")
         
         if self.max_parallel_uploads <= 0:
             validation_errors.append(f"Max parallel uploads must be positive, got {self.max_parallel_uploads}")
-        elif self.max_parallel_uploads > 50:
+        elif self.max_parallel_uploads > 500:
             validation_errors.append(f"Max parallel uploads seems too high ({self.max_parallel_uploads}), consider reducing to avoid overwhelming GCS")
+        
+        if self.download_max_workers <= 0:
+            validation_errors.append(f"Download max workers must be positive, got {self.download_max_workers}")
+        elif self.download_max_workers > 16:
+            validation_errors.append(f"Download max workers seems too high ({self.download_max_workers}), consider reducing to avoid overwhelming system")
         
         if self.rate_limit_per_vm <= 0:
             validation_errors.append(f"Rate limit per VM must be positive, got {self.rate_limit_per_vm}")
@@ -81,7 +95,7 @@ class GCPConfig:
         
         if not self.credentials_path:
             validation_errors.append("GCP credentials path is required - set GCP_CREDENTIALS_PATH environment variable")
-        elif not Path(self.credentials_path).exists():
+        elif os.getenv('TESTING_MODE') != 'true' and not Path(self.credentials_path).exists():
             validation_errors.append(f"GCP credentials file not found: {self.credentials_path}")
         elif not self.credentials_path.endswith('.json'):
             validation_errors.append(f"GCP credentials file should be a JSON file: {self.credentials_path}")
@@ -168,6 +182,20 @@ class OutputConfig:
             raise ValueError("Default limit must be positive")
 
 @dataclass
+class AuthenticationConfig:
+    """Authentication configuration"""
+    mode: str = "auto"  # auto, secret_manager, env_vars, mock
+    use_secret_manager: bool = False
+    use_mock_data: bool = False
+    mock_data_path: Optional[str] = None
+    
+    def __post_init__(self):
+        if self.mode == "auto":
+            self.use_secret_manager = os.getenv('USE_SECRET_MANAGER', 'false').lower() == 'true'
+            self.use_mock_data = os.getenv('USE_MOCK_DATA', 'false').lower() == 'true'
+            self.mock_data_path = os.getenv('MOCK_DATA_PATH', './mock_data')
+
+@dataclass
 class Config:
     """Main configuration class"""
     tardis: TardisConfig
@@ -175,6 +203,7 @@ class Config:
     service: ServiceConfig = field(default_factory=ServiceConfig)
     sharding: ShardingConfig = field(default_factory=ShardingConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
+    auth: AuthenticationConfig = field(default_factory=AuthenticationConfig)
     
     # Runtime configuration
     debug: bool = False
@@ -262,13 +291,46 @@ class ConfigManager:
         return config
     
     def _load_from_env(self) -> Dict[str, Any]:
-        """Load configuration from environment variables"""
+        """Load configuration from environment variables and Secret Manager"""
         config = {}
         
-        # Tardis configuration
-        tardis_api_key = os.getenv('TARDIS_API_KEY')
+        # Get GCP configuration first (needed for Secret Manager)
+        gcp_project_id = os.getenv('GCP_PROJECT_ID')
+        gcp_credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS') or os.getenv('GCP_CREDENTIALS_PATH')
+        
+        if not gcp_project_id:
+            raise ValueError("GCP_PROJECT_ID environment variable is required")
+        
+        # Try to get Tardis API key from Secret Manager first
+        tardis_api_key = None
+        use_secret_manager = os.getenv('USE_SECRET_MANAGER', 'false').lower() == 'true'
+        
+        if use_secret_manager and SECRET_MANAGER_AVAILABLE:
+            try:
+                secret_name = os.getenv('TARDIS_SECRET_NAME', 'tardis-api-key')
+                tardis_api_key = get_tardis_api_key(
+                    project_id=gcp_project_id,
+                    credentials_path=gcp_credentials_path,
+                    secret_name=secret_name
+                )
+                if tardis_api_key:
+                    logging.info("Retrieved Tardis API key from Secret Manager")
+            except Exception as e:
+                logging.warning(f"Failed to retrieve API key from Secret Manager: {e}")
+        
+        # Fallback to environment variable
         if not tardis_api_key:
-            raise ValueError("TARDIS_API_KEY environment variable is required")
+            tardis_api_key = os.getenv('TARDIS_API_KEY')
+            if tardis_api_key:
+                logging.info("Retrieved Tardis API key from environment variable")
+        
+        if not tardis_api_key:
+            error_msg = "Tardis API key not found. "
+            if use_secret_manager:
+                error_msg += f"Check Secret Manager secret '{os.getenv('TARDIS_SECRET_NAME', 'tardis-api-key')}' or set TARDIS_API_KEY environment variable."
+            else:
+                error_msg += "Set TARDIS_API_KEY environment variable or enable Secret Manager with USE_SECRET_MANAGER=true."
+            raise ValueError(error_msg)
         
         config['tardis'] = {
             'api_key': tardis_api_key,
@@ -277,16 +339,13 @@ class ConfigManager:
             'max_retries': int(os.getenv('TARDIS_MAX_RETRIES', '3')),
             'max_concurrent': int(os.getenv('TARDIS_MAX_CONCURRENT', '50')),
             'max_parallel_uploads': int(os.getenv('MAX_PARALLEL_UPLOADS', '20')),
+            'download_max_workers': int(os.getenv('DOWNLOAD_MAX_WORKERS', '2')),
             'rate_limit_per_vm': int(os.getenv('RATE_LIMIT_PER_VM', '1000000'))
         }
         
         # GCP configuration
-        gcp_project_id = os.getenv('GCP_PROJECT_ID')
-        gcp_credentials_path = os.getenv('GCP_CREDENTIALS_PATH')
         gcs_bucket = os.getenv('GCS_BUCKET')
         
-        if not gcp_project_id:
-            raise ValueError("GCP_PROJECT_ID environment variable is required")
         if not gcp_credentials_path:
             raise ValueError("GCP_CREDENTIALS_PATH environment variable is required")
         if not gcs_bucket:
@@ -304,8 +363,8 @@ class ConfigManager:
             'log_level': os.getenv('LOG_LEVEL', 'INFO'),
             'log_destination': os.getenv('LOG_DESTINATION', 'local'),
             'max_concurrent_requests': int(os.getenv('MAX_CONCURRENT_REQUESTS', '50')),
-            'batch_size': int(os.getenv('BATCH_SIZE', '1000')),
-            'memory_efficient': os.getenv('MEMORY_EFFICIENT', 'false').lower() == 'true',
+            'batch_size': int(os.getenv('BATCH_SIZE', '1')),  # Set to 1 for immediate uploads and better performance
+            'memory_efficient': os.getenv('MEMORY_EFFICIENT', 'true').lower() == 'true',  # Default to true
             'enable_caching': os.getenv('ENABLE_CACHING', 'true').lower() == 'true',
             'cache_ttl': int(os.getenv('CACHE_TTL', '3600'))
         }
@@ -326,6 +385,7 @@ class ConfigManager:
             'compression': os.getenv('COMPRESSION', 'snappy')
         }
         
+        
         # Runtime configuration
         config['debug'] = os.getenv('DEBUG', 'false').lower() == 'true'
         config['test_mode'] = os.getenv('TEST_MODE', 'false').lower() == 'true'
@@ -342,6 +402,7 @@ class ConfigManager:
             max_retries=config_dict.get('tardis', {}).get('max_retries', 3),
             max_concurrent=config_dict.get('tardis', {}).get('max_concurrent', 50),
             max_parallel_uploads=config_dict.get('tardis', {}).get('max_parallel_uploads', 20),
+            download_max_workers=config_dict.get('tardis', {}).get('download_max_workers', 1),
             rate_limit_per_vm=config_dict.get('tardis', {}).get('rate_limit_per_vm', 1000000)
         )
         

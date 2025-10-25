@@ -9,10 +9,10 @@ set -e
 PROJECT_ID="central-element-323112"
 ZONE="asia-northeast1-c"
 MACHINE_TYPE="e2-standard-4"
-IMAGE_FAMILY="ubuntu-2004-lts"
+IMAGE_FAMILY="ubuntu-2204-lts"
 IMAGE_PROJECT="ubuntu-os-cloud"
 VM_NAME="instrument-generator"
-DOCKER_IMAGE="market-tick-instrument-generator:latest"
+DOCKER_IMAGE="asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-instrument-generator:latest"
 
 # Colors for output
 RED='\033[0;31m'
@@ -33,6 +33,7 @@ show_usage() {
     echo "  start           - Start the VM"
     echo "  stop            - Stop the VM"
     echo "  status          - Show VM status"
+    echo "  health          - Check VM health and integrity events"
     echo "  ssh             - SSH into the VM"
     echo "  logs            - View logs"
     echo "  run             - Run instrument generation on the VM"
@@ -83,6 +84,19 @@ deploy_vm() {
     # Set the project
     echo -e "${YELLOW}🔧 Setting project to $PROJECT_ID...${NC}"
     gcloud config set project "$PROJECT_ID"
+    
+    # Run quality gates before deployment
+    echo -e "${YELLOW}🧪 Running quality gates...${NC}"
+    if [ -f "scripts/pre_deploy_check.sh" ]; then
+        if ./scripts/pre_deploy_check.sh; then
+            echo -e "${GREEN}✅ Quality gates passed${NC}"
+        else
+            echo -e "${RED}❌ Quality gates failed. Deployment aborted.${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${YELLOW}⚠️  Warning: Pre-deploy check script not found, skipping quality gates${NC}"
+    fi
 
     # Check if VM already exists
     if check_vm_exists; then
@@ -283,6 +297,36 @@ show_status() {
     fi
 }
 
+# Function to check VM health
+check_vm_health() {
+    echo -e "${YELLOW}🔍 Checking VM health for $VM_NAME...${NC}"
+    
+    # Check if VM is running
+    local status=$(gcloud compute instances describe $VM_NAME --zone=$ZONE --format="value(status)" 2>/dev/null || echo "NOT_FOUND")
+    
+    if [ "$status" = "NOT_FOUND" ]; then
+        echo -e "${RED}❌ VM $VM_NAME not found${NC}"
+        return 1
+    elif [ "$status" = "RUNNING" ]; then
+        echo -e "${GREEN}✅ VM $VM_NAME is running${NC}"
+        
+        # Check for integrity events
+        echo -e "${YELLOW}🔍 Checking for integrity events...${NC}"
+        local integrity_events=$(gcloud logging read "resource.type=gce_instance AND resource.labels.instance_id=$VM_NAME AND jsonPayload.@type=type.googleapis.com/cloud_integrity.IntegrityEvent" --limit=5 --format="value(timestamp)" 2>/dev/null | wc -l)
+        
+        if [ "$integrity_events" -gt 0 ]; then
+            echo -e "${YELLOW}⚠️  Found $integrity_events integrity events (this is normal for Shielded VMs)${NC}"
+        else
+            echo -e "${GREEN}✅ No recent integrity events${NC}"
+        fi
+        
+        return 0
+    else
+        echo -e "${RED}❌ VM $VM_NAME status: $status${NC}"
+        return 1
+    fi
+}
+
 # Function to SSH into VM
 ssh_vm() {
     echo -e "${YELLOW}🔗 Connecting to VM...${NC}"
@@ -373,8 +417,10 @@ run_instruments() {
         VM_STATUS=$(get_vm_status)
         
         if [ "$VM_STATUS" = "RUNNING" ]; then
-            # Build command
-            cmd="cd /opt/market-tick-data-handler && python3 -m src.main --mode instruments --start-date $start_date --end-date $end_date"
+            # Build Docker command
+            cmd="docker run --rm -v /var/log/market-data:/app/logs"
+            cmd="$cmd asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-instrument-generator:latest"
+            cmd="$cmd python -m market_data_tick_handler.main --mode instruments --start-date $start_date --end-date $end_date"
             if [ -n "$venues" ]; then
                 cmd="$cmd --venues $venues"
             fi
@@ -425,6 +471,9 @@ case "${1:-help}" in
         ;;
     status)
         show_status
+        ;;
+    health)
+        check_vm_health
         ;;
     ssh)
         ssh_vm

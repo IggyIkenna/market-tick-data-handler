@@ -10,7 +10,7 @@ set -e
 PROJECT_ID="central-element-323112"
 ZONE="asia-northeast1-c"
 MACHINE_TYPE_INSTRUMENTS="e2-standard-4"
-MACHINE_TYPE_TARDIS="n2-highmem-16"
+MACHINE_TYPE_TARDIS="e2-highmem-8"  # 8 vCPU, 64GB RAM - optimal for Tardis download with 2 workers
 IMAGE_FAMILY="ubuntu-2004-lts"
 IMAGE_PROJECT="ubuntu-os-cloud"
 
@@ -134,6 +134,10 @@ cd /opt/market-tick-data-handler
 # Set up environment
 cat > .env << 'ENVEOF'
 # Tardis API Configuration
+# For production, use Secret Manager instead of hardcoded API key
+USE_SECRET_MANAGER=true
+TARDIS_SECRET_NAME=tardis-api-key
+# Fallback API key (remove in production)
 TARDIS_API_KEY=TD.l6pTDHIcc9fwJZEz.Y7cp7lBSu-pkPEv.55-ZZYvZqtQL7hY.C2-pXYQ6yebRF7M.DwzJ7MFPry-C7Yp.xe1j
 TARDIS_BASE_URL=https://datasets.tardis.dev
 TARDIS_TIMEOUT=60
@@ -141,6 +145,7 @@ TARDIS_MAX_RETRIES=3
 TARDIS_MAX_CONCURRENT=50
 MAX_CONCURRENT_REQUESTS=50
 MAX_PARALLEL_UPLOADS=20
+DOWNLOAD_MAX_WORKERS=2
 RATE_LIMIT_PER_VM=1000000
 
 # GCP Configuration
@@ -218,7 +223,7 @@ echo "Shard $SHARD_INDEX processing date: $SHARD_DATE"
 
 # Run instrument generation for this shard's date
 echo "Starting instrument generation for $SHARD_DATE..."
-python3 -m src.main --mode instruments --start-date "$SHARD_DATE" --end-date "$SHARD_DATE"
+python3 -m market_data_tick_handler.main --mode instruments --start-date "$SHARD_DATE" --end-date "$SHARD_DATE"
 
 echo "Instrument generation completed for shard $SHARD_INDEX"
 EOF
@@ -321,6 +326,10 @@ cd /opt/market-tick-data-handler
 # Set up environment
 cat > .env << 'ENVEOF'
 # Tardis API Configuration
+# For production, use Secret Manager instead of hardcoded API key
+USE_SECRET_MANAGER=true
+TARDIS_SECRET_NAME=tardis-api-key
+# Fallback API key (remove in production)
 TARDIS_API_KEY=TD.l6pTDHIcc9fwJZEz.Y7cp7lBSu-pkPEv.55-ZZYvZqtQL7hY.C2-pXYQ6yebRF7M.DwzJ7MFPry-C7Yp.xe1j
 TARDIS_BASE_URL=https://datasets.tardis.dev
 TARDIS_TIMEOUT=60
@@ -328,6 +337,7 @@ TARDIS_MAX_RETRIES=3
 TARDIS_MAX_CONCURRENT=50
 MAX_CONCURRENT_REQUESTS=50
 MAX_PARALLEL_UPLOADS=20
+DOWNLOAD_MAX_WORKERS=2
 RATE_LIMIT_PER_VM=1000000
 
 # GCP Configuration
@@ -412,7 +422,7 @@ echo "Shard $SHARD_INDEX processing date: $SHARD_DATE"
 
 # Run data download for this shard's date with sharding parameters
 echo "Starting data download for $SHARD_DATE..."
-cmd="python3 -m src.main --mode download --start-date $SHARD_DATE --end-date $SHARD_DATE --shard-index $SHARD_INDEX --total-shards $TOTAL_SHARDS"
+cmd="python3 -m market_data_tick_handler.main --mode download --start-date $SHARD_DATE --end-date $SHARD_DATE --shard-index $SHARD_INDEX --total-shards $TOTAL_SHARDS"
 if [ -n "$VENUES" ]; then
     cmd="$cmd --venues $VENUES"
 fi

@@ -1,19 +1,101 @@
 # Market Data Handler - VM Deployment Guide
 
 ## Overview
-This guide covers VM deployment for the Market Tick Data Handler using the current deploy/vm/ script structure.
+This guide covers VM deployment for the Market Tick Data Handler with support for batch processing modes including instrument generation, data downloads, candle processing, and BigQuery uploads.
 
-## Current Architecture
-- **Single VM Deployment**: For development and testing
-- **Multiple VM Deployment**: For production with sharding
-- **Data Storage**: GCS bucket with single partition strategy
-- **Entry Point**: `src/main.py` with three modes (instruments, download, full-pipeline)
+## Current Architecture (Refactored December 2024)
+- **Package/Library Architecture**: Clean internal package for downstream services
+- **VM Deployments**: Batch processing jobs only (no live streaming services)
+- **VM Type**: e2-standard-8 (8 vCPUs, 32GB RAM, 16 Gbps network)
+- **Performance**: 8 workers, 500 concurrent downloads, 200 parallel uploads
+- **Data Storage**: GCS bucket with organized partition strategy
+- **Entry Point**: `src/main.py` with multiple batch processing modes
+- **Live Streaming**: Node.js services (not VM-deployed)
 
 ## Key Files
-- `deploy/vm/deploy-instruments.sh` - Single VM for instrument generation
-- `deploy/vm/deploy-tardis.sh` - Single VM for data download
-- `deploy/vm/shard-deploy.sh` - Multiple VMs with sharding
+- `deploy/vm/deploy-download.sh` - Single VM for download mode
+- `deploy/vm/shard-deploy-download.sh` - Multiple VMs with date-based sharding for download
+- `deploy/vm/deploy-candle-processing.sh` - Candle processing deployment
+- `deploy/vm/deploy-bigquery-upload.sh` - BigQuery upload deployment
+- `deploy/vm/logs-pull.sh` - Log aggregation and monitoring from Cloud Logging
+- `deploy/vm/check-gcs.sh` - GCS data validation and completeness checking
 - `deploy/vm/build-images.sh` - Docker image build and push
+- `docs/BUDGET_ANALYSIS.md` - Cost analysis and budget planning
+
+## VM Naming Convention (Updated)
+- **Single VM**: `market-data-single-YYYYMMDD` (e.g., `market-data-single-20230602`)
+- **Sharded VMs**: `market-data-shard-N` (e.g., `market-data-shard-0`, `market-data-shard-1`)
+- **Monitoring Pattern**: `market-data-*` for all VMs
+
+## Quick Start Commands (Refactored Architecture)
+
+### Batch Processing Deployments
+
+#### 1. Data Download (Single VM)
+```bash
+./deploy/vm/deploy-download.sh deploy \
+    --start-date 2023-06-02 \
+    --end-date 2023-06-02 \
+    --venues binance,binance-futures,deribit,bybit,bybit-spot,okex,okex-futures,okex-swap \
+    --data-types trades,book_snapshot_5,derivative_ticker,liquidations,options_chain
+```
+
+#### 2. Candle Processing (Single VM)
+```bash
+./deploy/vm/deploy-candle-processing.sh deploy \
+    --start-date 2024-01-01 \
+    --end-date 2024-01-01
+```
+
+#### 3. BigQuery Upload (Single VM)
+```bash
+./deploy/vm/deploy-bigquery-upload.sh deploy \
+    --start-date 2024-01-01 \
+    --end-date 2024-01-01
+```
+
+#### 4. Sharded Data Download (Production)
+```bash
+./deploy/vm/shard-deploy-download.sh deploy \
+    --start-date 2023-05-23 \
+    --end-date 2024-10-22 \
+    --shards 100 \
+    --venues binance,binance-futures,deribit,bybit,bybit-spot,okex,okex-futures,okex-swap \
+    --data-types trades,book_snapshot_5,derivative_ticker,liquidations,options_chain
+```
+
+### Live Streaming (Local Development)
+```bash
+# Stream raw ticks to BigQuery
+./deploy/local/run-main.sh streaming-ticks --symbol BTC-USDT
+
+# Stream real-time candles with HFT features
+./deploy/local/run-main.sh streaming-candles --symbol BTC-USDT,ETH-USDT
+```
+
+### Monitoring & Observability
+```bash
+# Monitor all VMs
+./deploy/vm/logs-pull.sh --pattern "market-data-*" --follow
+
+# Check specific shard
+./deploy/vm/logs-pull.sh market-data-shard-0 --lines 100
+
+# Validate GCS data
+./deploy/vm/check-gcs.sh --start-date 2023-05-23 --end-date 2024-10-22 --venue binance
+
+# Fast cleanup
+./deploy/vm/shard-deploy-download.sh cleanup
+```
+
+## Performance Specifications
+- **VM Type**: e2-standard-8 (8 vCPUs, 32GB RAM, 16 Gbps network)
+- **Workers**: 8 parallel workers per VM
+- **Concurrent Downloads**: 500 (Tardis API)
+- **Parallel Uploads**: 200 (GCS)
+- **Batch Size**: 5000 instruments
+- **Memory Threshold**: 85%
+- **Network Utilization**: <1% of available bandwidth (optimization opportunity)
 
 ## Critical Pitfalls & Solutions
 
@@ -87,12 +169,14 @@ gcloud compute addresses list --filter="name~market-data-ip" --format="value(nam
 ## Working Configuration
 
 ### VM Configuration
-- **Machine Type**: e2-standard-2 (2 vCPUs, 8GB RAM)
-- **Disk Size**: 50GB (sufficient for 5+ years of data)
+- **Machine Type**: e2-highmem-8 (8 vCPUs, 64GB RAM) for Tardis download
+- **Workers**: 2 (leaving 2 vCPUs for system operations)
+- **Disk Size**: 100GB (sufficient for large parquet files)
 - **Disk Type**: pd-standard
 - **Image**: ubuntu-2204-lts
 - **Scopes**: https://www.googleapis.com/auth/cloud-platform
 - **Preemptible**: Yes (for cost savings)
+- **Memory Requirements**: 64GB allows parallel processing of large parquet files
 
 ### Environment Variables
 ```bash
@@ -114,27 +198,38 @@ TOTAL_SHARDS="40"
 
 ### Single VM Deployment (Development/Testing)
 ```bash
-# Deploy single VM for instrument generation
-./deploy/vm/deploy-instruments.sh deploy
+# Deploy single VM for download mode
+./deploy/vm/deploy-download.sh deploy --start-date 2023-05-23 --end-date 2023-05-23 --venues binance
 
-# Deploy single VM for data download
-./deploy/vm/deploy-tardis.sh deploy
+# Check VM status
+./deploy/vm/deploy-download.sh status --vm-name download-vm-binance-20230523
 
-# Run operations on deployed VMs
-./deploy/vm/deploy-instruments.sh run --start-date 2023-05-23 --end-date 2023-05-25
-./deploy/vm/deploy-tardis.sh run --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit
+# View logs
+./deploy/vm/logs-pull.sh download-vm-binance-20230523 --lines 50
+
+# Run download on existing VM
+./deploy/vm/deploy-download.sh run --start-date 2023-05-23 --end-date 2023-05-23 --venues binance --vm-name download-vm-binance-20230523
+
+# Clean up
+./deploy/vm/deploy-download.sh delete --vm-name download-vm-binance-20230523
 ```
 
-### Multiple VM Deployment (Production)
+### Sharded VM Deployment (Production)
 ```bash
-# Deploy multiple VMs for instrument generation
-./deploy/vm/shard-deploy.sh instruments --start-date 2023-05-23 --end-date 2023-05-25 --shards 10
+# Deploy 4 VMs for 4 days of data (each VM processes one complete day)
+./deploy/vm/shard-deploy-download.sh deploy --start-date 2023-05-23 --end-date 2023-05-26 --shards 4 --venues binance
 
-# Deploy multiple VMs for data download
-./deploy/vm/shard-deploy.sh tardis --start-date 2023-05-23 --end-date 2023-05-25 --shards 20
+# Check status of all shard VMs
+./deploy/vm/shard-deploy-download.sh status
 
-# Clean up all VMs
-./deploy/vm/shard-deploy.sh cleanup
+# View logs from all shard VMs
+./deploy/vm/logs-pull.sh --pattern "download-shard-binance-*" --follow
+
+# Validate data completeness in GCS
+./deploy/vm/check-gcs.sh --start-date 2023-05-23 --end-date 2023-05-26 --venue binance --detailed
+
+# Clean up all shard VMs
+./deploy/vm/shard-deploy-download.sh cleanup
 ```
 
 ### Docker Image Management
@@ -165,13 +260,44 @@ gsutil ls gs://market-data-tick/instrument_availability/by_date/day-2023-05-23/
 
 # Check tick data
 gsutil ls gs://market-data-tick/raw_tick_data/by_date/day-2023-05-23/data_type-trades/
+
+# Validate data completeness using the check script
+./deploy/vm/check-gcs.sh --start-date 2023-05-23 --end-date 2023-05-26 --venue binance --detailed
 ```
+
+## Download Mode Architecture
+
+### Sharding Strategy
+- **Date-based Sharding**: Each VM processes one complete day of data
+- **Parallel Processing**: Multiple VMs run simultaneously for different days
+- **VM Naming**: `download-shard-{venue}-{shard_index}` (e.g., `download-shard-binance-0`)
+- **Data Organization**: Data stored in GCS with structure `raw_tick_data/by_date/day-{date}/data_type-{type}/`
+
+### VM Configuration
+- **Machine Type**: `e2-highmem-8` (8 vCPUs, 64GB RAM)
+- **Disk Size**: 100GB (sufficient for large parquet files)
+- **Image**: Ubuntu 22.04 LTS
+- **Docker Image**: `market-tick-tardis-downloader:latest`
+- **Scopes**: Full cloud platform access for GCS uploads
+
+### Data Flow
+1. **VM Creation**: Each VM is created with metadata specifying its shard index and date range
+2. **Startup Script**: VM pulls Docker image and runs download for its assigned date
+3. **Data Processing**: Downloads tick data for specified venues and data types
+4. **GCS Upload**: Uploads processed data to organized GCS structure
+5. **Logging**: All operations logged to Cloud Logging with proper tagging
+
+### Monitoring & Validation
+- **Log Aggregation**: `logs-pull.sh` pulls logs from Cloud Logging
+- **Data Validation**: `check-gcs.sh` verifies data completeness and file counts
+- **Status Monitoring**: Real-time VM status and process monitoring
+- **Error Handling**: Comprehensive error checking and user feedback
 
 ## Cost Optimization
 - ✅ **Preemptible VMs**: ~80% cost savings
 - ✅ **No reserved IPs**: Using ephemeral IPs
-- ✅ **Right-sized disks**: 50GB sufficient for data volume
-- ✅ **Efficient sharding**: 1 VM per instrument
+- ✅ **Right-sized disks**: 100GB sufficient for data volume
+- ✅ **Efficient sharding**: 1 VM per day for optimal parallelization
 
 ## Next Steps for 4-Tier Plan
 

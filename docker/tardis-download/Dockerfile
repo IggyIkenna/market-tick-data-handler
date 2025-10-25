@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV PIP_NO_CACHE_DIR=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV CLOUDSDK_PYTHON_SITEPACKAGES=1
 
 # Install system dependencies for building
 RUN apt-get update && apt-get install -y \
@@ -66,4 +67,4 @@ RUN useradd -m -s /bin/bash tickdata && \
 USER tickdata
 
 # Default command - run tick data download using main.py
-CMD ["python", "-m", "src.main", "--mode", "download", "--start-date", "2023-05-23", "--end-date", "2023-05-25", "--venues", "deribit", "--data-types", "trades", "book_snapshot_5"]
+CMD ["python", "-m", "market_data_tick_handler.main.", "--mode", "download", "--start-date", "2023-05-23", "--end-date", "2023-05-25", "--venues", "deribit", "--data-types", "trades", "book_snapshot_5"]

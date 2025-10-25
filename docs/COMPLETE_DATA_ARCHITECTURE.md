@@ -1,71 +1,146 @@
 # Complete Data Architecture with Instrument IDs
 
-> **MIGRATION NOTICE**: This document uses the new dash-based partitioning convention.
-> Old format: `year=2023/month=05/day=23/venue=binance`
-> New format: `year-2023/month-05/day-23/venue-binance`
+> **REFACTORED IMPLEMENTATION**: This document reflects the refactored package/library architecture implemented in December 2024.
 > 
-> This is a BREAKING CHANGE with no backward compatibility.
-> See `docs/UNIVERSAL_PARTITIONING_STRATEGY.md` for details.
+> The system uses a clean package architecture with:
+> - VM deployments for batch processing (instruments, downloads, candles, BigQuery uploads)
+> - Node.js services for live streaming (not VM-deployed)
+> - Package/library interfaces for downstream services
+> - Single partition strategy for optimal performance
 
-## 🎯 **Three-Tier Data Architecture**
+## 🎯 **Refactored Architecture: Package/Library Design**
 
-Based on your requirements, here's the optimal partitioning strategy for each data tier:
+The system has been refactored into a clean package/library architecture supporting both batch processing and real-time streaming:
 
-## 📊 **1. Raw Tick Data (Execution Algos & Backtest) - BigQuery Optimized**
+### Complete Data Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    VM Deployment Pipeline                       │
+│                                                                 │
+│  1. Instrument Definitions → GCS                                │
+│  2. Missing Data Reports → GCS                                  │
+│  3. Tick Data Download → GCS (optimized Parquet)                │
+│  4. Candle Processing → GCS (15s-24h with HFT features)        │
+│  5. BigQuery Upload → BigQuery (candles with HFT features)      │
+│  6. MFT Features → GCS (1m+ timeframes)                         │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Features Service Package Usage               │
+│                                                                 │
+│  1. Import market data package                                  │
+│  2. Query instruments from GCS                                  │
+│  3. Get candle data from BigQuery (with HFT features)           │
+│  4. Process additional MFT features                             │
+│  5. Push features to GCS for backtesting                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Data Storage Architecture
+
+- **GCS Storage**:
+  - Raw tick data (optimized Parquet with timestamp partitioning)
+  - Processed candles (15s, 1m, 5m, 15m, 1h, 4h, 24h timeframes)
+  - MFT features (1m+ timeframes)
+  - Instrument definitions
+
+- **BigQuery Storage**:
+  - Candles with HFT features (one table per timeframe)
+  - Real-time streaming data
+
+- **Package Usage**:
+  - Features service imports package to query BigQuery
+  - Gets candle data with HFT features
+  - Processes additional MFT features
+  - Pushes features to GCS for backtesting
+
+## 📊 **1. Raw Tick Data (Execution Algos & Backtest) - Current Implementation**
 ```
 gs://market-data-tick/raw_tick_data/
-├── by_date/
-│   ├── year-2023/month-05/day-23/
-│   │   ├── data_type-trades/
-│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet          # High-frequency execution data
-│   │   │   ├── binance:SPOT_PAIR:ETH-USDT.parquet
-│   │   │   ├── deribit:Perp:BTC-USDT.parquet
-│   │   │   └── deribit:Option:BTC-USD-50000-241225-C.parquet
-│   │   ├── data_type-book_snapshot_5/
-│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet          # Order book for execution
-│   │   │   ├── binance:SPOT_PAIR:ETH-USDT.parquet
-│   │   │   └── deribit:Perp:BTC-USDT.parquet
-│   │   └── data_type-options_chain/
-│   │       └── deribit:Option:BTC-USD-50000-241225-C.parquet
-│   └── ...
-├── by_venue/
-│   ├── venue-binance/year-2023/month-05/day-23/
-│   │   ├── data_type-trades/
-│   │   │   ├── binance:SPOT_PAIR:BTC-USDT.parquet
-│   │   │   └── binance:SPOT_PAIR:ETH-USDT.parquet
-│   │   └── data_type-book_snapshot_5/
-│   │       ├── binance:SPOT_PAIR:BTC-USDT.parquet
-│   │       └── binance:SPOT_PAIR:ETH-USDT.parquet
-│   └── venue-deribit/year-2023/month-05/day-23/
-│       ├── data_type-trades/
-│       │   └── deribit:Perp:BTC-USDT.parquet
-│       └── data_type-options_chain/
-│           └── deribit:Option:BTC-USD-50000-241225-C.parquet
-└── by_type/
-    ├── type-spot/year-2023/month-05/day-23/
-    │   └── data_type-trades/
-    │       ├── binance:SPOT_PAIR:BTC-USDT.parquet
-    │       └── binance:SPOT_PAIR:ETH-USDT.parquet
-    ├── type-perpetual/year-2023/month-05/day-23/
-    │   └── data_type-trades/
-    │       └── deribit:Perp:BTC-USDT.parquet
-    └── type-option/year-2023/month-05/day-23/
+└── by_date/
+    └── day-2023-05-23/
+        ├── data_type-trades/
+        │   ├── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # High-frequency execution data
+        │   ├── BINANCE:SPOT_PAIR:ETH-USDT.parquet
+        │   ├── DERIBIT:PERP:BTC-USDT.parquet
+        │   └── DERIBIT:OPTION:BTC-USD-50000-241225-CALL.parquet
+        ├── data_type-book_snapshot_5/
+        │   ├── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # Order book for execution
+        │   ├── BINANCE:SPOT_PAIR:ETH-USDT.parquet
+        │   └── DERIBIT:PERP:BTC-USDT.parquet
         └── data_type-options_chain/
-            └── deribit:Option:BTC-USD-50000-241225-C.parquet
+            └── DERIBIT:OPTION:BTC-USD-50000-241225-CALL.parquet
 ```
 
-## 📈 **2. Processed OHLCV Data (Features & ML Pipeline)**
+## 📈 **2. Instrument Definitions (Strategy Subscriptions) - Current Implementation**
 ```
-gs://market-data-candles/daily/
-├── by_date/
-│   ├── year-2023/month-05/day-23/
-│   │   ├── venue-binance/instrument-binance:SPOT_PAIR:BTC-USDT/
-│   │   │   ├── ohlcv_1m.parquet        # Raw 1m candles from Binance
-│   │   │   ├── ohlcv_5m.parquet        # Aggregated 5m candles
-│   │   │   ├── ohlcv_15m.parquet       # Aggregated 15m candles
-│   │   │   ├── ohlcv_1h.parquet        # Aggregated 1h candles
-│   │   │   ├── ohlcv_4h.parquet        # Aggregated 4h candles
-│   │   │   ├── ohlcv_1d.parquet        # Aggregated daily candles
+gs://market-data-tick/instrument_availability/
+└── by_date/
+    └── day-2023-05-23/
+        └── instruments.parquet
+```
+
+## 📈 **2. Processed Candles (Features & ML Pipeline) - New Implementation**
+```
+gs://market-data-tick/processed_candles/
+└── by_date/
+    └── day-2024-01-01/
+        ├── timeframe-15s/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 15s candles with HFT features
+        ├── timeframe-1m/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 1m candles with HFT features
+        ├── timeframe-5m/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 5m aggregated candles
+        ├── timeframe-15m/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 15m aggregated candles
+        ├── timeframe-1h/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 1h aggregated candles
+        ├── timeframe-4h/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 4h aggregated candles
+        └── timeframe-24h/
+            └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 24h aggregated candles
+```
+
+## 📊 **3. Order Book Snapshots (Execution & MFT Features) - New Implementation**
+```
+gs://market-data-tick/processed_book_snapshots/
+└── by_date/
+    └── day-2024-01-01/
+        ├── timeframe-15s/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 15s book snapshots
+        ├── timeframe-1m/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 1m book snapshots
+        ├── timeframe-5m/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 5m book snapshots
+        ├── timeframe-15m/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 15m book snapshots
+        ├── timeframe-1h/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 1h book snapshots
+        ├── timeframe-4h/
+        │   └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 4h book snapshots
+        └── timeframe-24h/
+            └── BINANCE:SPOT_PAIR:BTC-USDT.parquet          # 24h book snapshots
+```
+
+## 📈 **4. BigQuery Analytics Tables (Historical Analysis) - New Implementation**
+```
+BigQuery Dataset: market_data_analytics
+├── candles_15s          # 15s candles with HFT features
+├── candles_1m           # 1m candles with HFT features
+├── candles_5m           # 5m aggregated candles
+├── candles_15m          # 15m aggregated candles
+├── candles_1h           # 1h aggregated candles
+├── candles_4h           # 4h aggregated candles
+├── candles_24h          # 24h aggregated candles
+├── book_snapshots_15s   # 15s order book snapshots
+├── book_snapshots_1m    # 1m order book snapshots
+├── book_snapshots_5m    # 5m order book snapshots
+├── book_snapshots_15m   # 15m order book snapshots
+├── book_snapshots_1h    # 1h order book snapshots
+├── book_snapshots_4h    # 4h order book snapshots
+└── book_snapshots_24h   # 24h order book snapshots
 │   │   │   ├── technical_features.parquet
 │   │   │   ├── fundamental_features.parquet
 │   │   │   └── ml_signals.parquet

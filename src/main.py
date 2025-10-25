@@ -12,9 +12,9 @@ Uses optimized single partition strategy for maximum efficiency:
 - Tick data: by_date/day-{date}/data_type-{type}/{instrument_key}.parquet
 
 Usage:
-    python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
-    python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25
-    python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+    python -m market_data_tick_handler.main. --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
+    python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-25
+    python -m market_data_tick_handler.main. --mode full-pipeline-ticks --start-date 2023-05-23 --end-date 2023-05-25
 """
 
 import sys
@@ -77,11 +77,18 @@ class InstrumentGenerationHandler(ModeHandler):
     async def run(self, start_date: datetime, end_date: datetime, 
                   exchanges: List[str] = None, max_workers: int = 4, **kwargs):
         """Generate instrument definitions and upload to GCS with multithreading"""
+        
+        # Calculate total days for progress tracking
+        total_days = (end_date - start_date).days + 1
+        
         logger.info(f"🎯 Starting instrument generation from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"📅 Processing {total_days} days total")
+        logger.info(f"🏢 Processing {len(exchanges)} exchanges per day")
         logger.info(f"🚀 Using {max_workers} workers for parallel processing")
         
         if exchanges is None:
-            exchanges = ['binance', 'binance-futures', 'deribit', 'bybit', 'bybit-spot', 'okex', 'okex-futures', 'okex-swap']
+            # This should not happen as exchanges are now derived from venues
+            raise ValueError("Exchanges parameter is required - this should be derived from venues")
         
         results = {
             'total_days': 0,
@@ -94,9 +101,11 @@ class InstrumentGenerationHandler(ModeHandler):
         
         # Process each day
         current_date = start_date
+        day_counter = 0
         while current_date <= end_date:
+            day_counter += 1
             results['total_days'] += 1
-            logger.info(f"📅 Processing {current_date.strftime('%Y-%m-%d')}...")
+            logger.info(f"📅 Processing day {day_counter}/{total_days}: {current_date.strftime('%Y-%m-%d')}")
             
             try:
                 # Process all exchanges in parallel using ThreadPoolExecutor
@@ -106,7 +115,8 @@ class InstrumentGenerationHandler(ModeHandler):
                 def process_exchange(exchange):
                     """Process a single exchange - runs in thread"""
                     thread_id = threading.current_thread().ident
-                    logger.info(f"  🏢 Processing {exchange} (thread {thread_id})...")
+                    exchange_idx = exchanges.index(exchange) + 1
+                    logger.info(f"  🏢 Processing exchange {exchange_idx}/{len(exchanges)}: {exchange} (thread {thread_id})")
                     
                     try:
                         exchange_data, exchange_stats = self.generator.process_exchange_symbols(
@@ -159,10 +169,14 @@ class InstrumentGenerationHandler(ModeHandler):
                             
                             if result['success'] and result['data'] is not None:
                                 daily_instruments.append(result['data'])
+                                instruments_count = len(result['data'])
+                                total_instruments_today = sum(len(df) for df in daily_instruments)
+                                logger.info(f"    📊 {result['exchange']}: {instruments_count} instruments (daily total: {total_instruments_today})")
                                 
                                 # Track parsing failures
                                 if result['stats'] and result['stats'].get('failed_parsing', 0) > 0:
                                     daily_parsing_failures += result['stats']['failed_parsing']
+                                    logger.warning(f"    ⚠️  {result['exchange']}: {result['stats']['failed_parsing']} parsing failures")
                             else:
                                 if 'error' in result:
                                     results['errors'].append(f"Exchange {exchange}: {result['error']}")
@@ -250,17 +264,35 @@ class TickDataDownloadHandler(ModeHandler):
     
     def __init__(self, config):
         super().__init__(config)
-        self.download_orchestrator = DownloadOrchestrator(self.gcs_bucket, self.tardis_api_key)
+        self.download_orchestrator = DownloadOrchestrator(
+            self.gcs_bucket, 
+            self.tardis_api_key,
+            max_workers=config.tardis.download_max_workers
+        )
     
     async def run(self, start_date: datetime, end_date: datetime,
                   venues: List[str] = None, instrument_types: List[str] = None,
                   data_types: List[str] = None, max_instruments: int = None,
-                  shard_index: int = None, total_shards: int = None, **kwargs):
+                  shard_index: int = None, total_shards: int = None, 
+                  force_download: bool = False, **kwargs):
         """Download tick data and upload to GCS"""
-        logger.info(f"📥 Starting tick data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        # Calculate total days for progress tracking
+        total_days = (end_date - start_date).days + 1
+        
+        if force_download:
+            logger.info(f"🚀 Starting FORCE tick data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            logger.info(f"⚠️  FORCE mode: Will download all data regardless of existing files")
+        else:
+            logger.info(f"📥 Starting tick data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            logger.info(f"🔍 Missing data mode: Will only download missing data")
+        
+        logger.info(f"📅 Processing {total_days} days total")
+        logger.info(f"🎯 Data types: {data_types or ['trades', 'book_snapshot_5', 'derivative_ticker', 'liquidations', 'options_chain']}")
+        logger.info(f"🏢 Venues: {venues or 'all'}")
         
         if data_types is None:
-            data_types = ['trades', 'book_snapshot_5']
+            data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'liquidations', 'options_chain']
         
         results = {
             'total_days': 0,
@@ -272,26 +304,44 @@ class TickDataDownloadHandler(ModeHandler):
         
         # Process each day
         current_date = start_date
+        day_counter = 0
         while current_date <= end_date:
+            day_counter += 1
             results['total_days'] += 1
-            logger.info(f"📅 Processing {current_date.strftime('%Y-%m-%d')}...")
+            logger.info(f"📅 Processing day {day_counter}/{total_days}: {current_date.strftime('%Y-%m-%d')}")
             
             try:
-                download_result = await self.download_orchestrator.download_and_upload_data(
-                    date=current_date,
-                    venues=venues,
-                    instrument_types=instrument_types,
-                    data_types=data_types,
-                    max_instruments=max_instruments,
-                    shard_index=shard_index,
-                    total_shards=total_shards
-                )
+                if force_download:
+                    # Force download: download all data regardless of existing files
+                    logger.info(f"🚀 Force downloading all data for {current_date.strftime('%Y-%m-%d')}")
+                    download_result = await self.download_orchestrator.download_and_upload_data(
+                        date=current_date,
+                        venues=venues,
+                        instrument_types=instrument_types,
+                        data_types=data_types,
+                        max_instruments=max_instruments,
+                        shard_index=shard_index,
+                        total_shards=total_shards
+                    )
+                else:
+                    # Missing data mode: only download missing data
+                    logger.info(f"🔍 Checking for missing data on {current_date.strftime('%Y-%m-%d')}")
+                    download_result = await self.download_orchestrator.download_missing_data(
+                        date=current_date,
+                        venues=venues,
+                        instrument_types=instrument_types,
+                        data_types=data_types,
+                        max_instruments=max_instruments
+                    )
                 
                 results['total_downloads'] += download_result.get('processed', 0)
                 results['failed_downloads'] += download_result.get('failed', 0)
                 results['processed_days'] += 1
                 
-                logger.info(f"✅ Downloaded data for {current_date.strftime('%Y-%m-%d')}")
+                if force_download:
+                    logger.info(f"✅ Force downloaded data for {current_date.strftime('%Y-%m-%d')}")
+                else:
+                    logger.info(f"✅ Downloaded missing data for {current_date.strftime('%Y-%m-%d')}")
                 
             except Exception as e:
                 error_msg = f'Error downloading data for {current_date.strftime("%Y-%m-%d")}: {e}'
@@ -317,17 +367,28 @@ class MissingDataDownloadHandler(ModeHandler):
     
     def __init__(self, config):
         super().__init__(config)
-        self.download_orchestrator = DownloadOrchestrator(self.gcs_bucket, self.tardis_api_key)
+        self.download_orchestrator = DownloadOrchestrator(
+            self.gcs_bucket, 
+            self.tardis_api_key,
+            max_workers=config.tardis.download_max_workers
+        )
     
     async def run(self, start_date: datetime, end_date: datetime,
                   venues: List[str] = None, instrument_types: List[str] = None,
                   data_types: List[str] = None, max_instruments: int = None,
                   shard_index: int = None, total_shards: int = None, **kwargs):
         """Download only missing data based on missing data reports from GCS"""
+        
+        # Calculate total days for progress tracking
+        total_days = (end_date - start_date).days + 1
+        
         logger.info(f"📥 Starting missing data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"📅 Processing {total_days} days total")
+        logger.info(f"🎯 Data types: {data_types or ['trades', 'book_snapshot_5', 'derivative_ticker', 'liquidations', 'options_chain']}")
+        logger.info(f"🏢 Venues: {venues or 'all'}")
         
         if data_types is None:
-            data_types = ['trades', 'book_snapshot_5']
+            data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'liquidations', 'options_chain']
         
         results = {
             'total_days': 0,
@@ -339,9 +400,11 @@ class MissingDataDownloadHandler(ModeHandler):
         
         # Process each day
         current_date = start_date
+        day_counter = 0
         while current_date <= end_date:
+            day_counter += 1
             results['total_days'] += 1
-            logger.info(f"📅 Processing missing data for {current_date.strftime('%Y-%m-%d')}...")
+            logger.info(f"📅 Processing day {day_counter}/{total_days}: {current_date.strftime('%Y-%m-%d')} (missing data)")
             
             try:
                 download_result = await self.download_orchestrator.download_missing_data(
@@ -396,7 +459,12 @@ class CheckGapsHandler(ModeHandler):
                   data_types: List[str] = None, max_instruments: int = None,
                   shard_index: int = None, total_shards: int = None, **kwargs):
         """Check for missing instrument definitions only - light check for gaps"""
+        
+        # Calculate total days for progress tracking
+        total_days = (end_date - start_date).days + 1
+        
         logger.info(f"🔍 Checking for missing instrument definitions from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"📅 Validating {total_days} days total")
         
         results = {
             'total_days': 0,
@@ -407,9 +475,12 @@ class CheckGapsHandler(ModeHandler):
         
         # Check each day for instrument definitions only
         current_date = start_date
+        day_counter = 0
         while current_date <= end_date:
+            day_counter += 1
             results['total_days'] += 1
             date_str = current_date.strftime('%Y-%m-%d')
+            logger.info(f"📅 Validating day {day_counter}/{total_days}: {date_str}")
             
             # Check for instrument definitions
             instrument_def_path = f"instrument_availability/by_date/day-{date_str}/instruments.parquet"
@@ -468,7 +539,14 @@ class DataValidationHandler(ModeHandler):
                   venues: List[str] = None, instrument_types: List[str] = None,
                   data_types: List[str] = None, **kwargs):
         """Validate data completeness and check for missing data"""
+        
+        # Calculate total days for progress tracking
+        total_days = (end_date - start_date).days + 1
+        
         logger.info(f"🔍 Starting data validation from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"📅 Validating {total_days} days total")
+        logger.info(f"🎯 Data types: {data_types or ['trades', 'book_snapshot_5', 'derivative_ticker', 'options_chain', 'liquidations']}")
+        logger.info(f"🏢 Venues: {venues or 'all'}")
         
         if data_types is None:
             # Check for all available data types based on instrument definitions
@@ -538,12 +616,99 @@ class DataValidationHandler(ModeHandler):
         
         return results
 
+class MissingReportsHandler(ModeHandler):
+    """Handles missing data report generation and upload to GCS"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.data_validator = DataValidator(self.gcs_bucket)
+    
+    async def run(self, start_date: datetime, end_date: datetime,
+                  venues: List[str] = None, instrument_types: List[str] = None,
+                  data_types: List[str] = None, **kwargs):
+        """Generate missing data reports for the date range and upload to GCS"""
+        
+        # Calculate total days for progress tracking
+        total_days = (end_date - start_date).days + 1
+        
+        logger.info(f"📊 Starting missing data report generation from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        logger.info(f"📅 Processing {total_days} days total")
+        logger.info(f"🎯 Data types: {data_types or ['trades', 'book_snapshot_5', 'derivative_ticker', 'options_chain', 'liquidations']}")
+        logger.info(f"🏢 Venues: {venues or 'all'}")
+        
+        if data_types is None:
+            data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'options_chain', 'liquidations']
+        
+        results = {
+            'total_days': total_days,
+            'processed_days': 0,
+            'reports_generated': 0,
+            'reports_uploaded': 0,
+            'total_missing_entries': 0,
+            'errors': []
+        }
+        
+        # Process each day
+        current_date = start_date
+        day_counter = 0
+        
+        while current_date <= end_date:
+            day_counter += 1
+            results['processed_days'] = day_counter
+            
+            logger.info(f"📅 Processing day {day_counter}/{total_days}: {current_date.strftime('%Y-%m-%d')}")
+            
+            try:
+                # Generate missing data report for this day (includes GCS upload)
+                report = self.data_validator.generate_missing_data_report(
+                    start_date=current_date,
+                    end_date=current_date,
+                    venues=venues,
+                    instrument_types=instrument_types,
+                    data_types=data_types,
+                    upload_to_gcs=True
+                )
+                
+                # Always count as uploaded (even if empty) to overwrite previous files
+                results['reports_uploaded'] += 1
+                results['total_missing_entries'] += report['missing_count']
+                
+                if report['status'] == 'incomplete':
+                    logger.info(f"  ✅ Generated missing data report: {report['missing_count']} missing entries")
+                else:
+                    logger.info(f"  ✅ No missing data for {current_date.strftime('%Y-%m-%d')} (uploaded empty report)")
+                
+                results['reports_generated'] += 1
+                
+            except Exception as e:
+                error_msg = f"Failed to process {current_date.strftime('%Y-%m-%d')}: {e}"
+                logger.error(f"  ❌ {error_msg}")
+                results['errors'].append(error_msg)
+            
+            # Move to next day
+            current_date += timedelta(days=1)
+        
+        # Print summary
+        logger.info('🎉 MISSING DATA REPORTS COMPLETED')
+        logger.info(f"📊 Total days: {results['total_days']}")
+        logger.info(f"✅ Processed days: {results['processed_days']}")
+        logger.info(f"📄 Reports generated: {results['reports_generated']}")
+        logger.info(f"☁️ Reports uploaded: {results['reports_uploaded']}")
+        logger.info(f"📈 Total missing entries: {results['total_missing_entries']}")
+        logger.info(f"❌ Errors: {len(results['errors'])}")
+        
+        return results
+
 class FullPipelineHandler(ModeHandler):
     """Handles the complete pipeline: instruments -> download -> validate"""
     
     def __init__(self, config):
         super().__init__(config)
-        self.download_orchestrator = DownloadOrchestrator(self.gcs_bucket, self.tardis_api_key)
+        self.download_orchestrator = DownloadOrchestrator(
+            self.gcs_bucket, 
+            self.tardis_api_key,
+            max_workers=config.tardis.download_max_workers
+        )
     
     async def run(self, start_date: datetime, end_date: datetime,
                   exchanges: List[str] = None, venues: List[str] = None,
@@ -610,7 +775,7 @@ class FullPipelineHandler(ModeHandler):
         logger.info(f"📥 Starting tick data download from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
         
         if data_types is None:
-            data_types = ['trades', 'book_snapshot_5']
+            data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'liquidations', 'options_chain']
         
         results = {
             'total_days': 0,
@@ -662,6 +827,272 @@ class FullPipelineHandler(ModeHandler):
         
         return results
 
+class CandleProcessingHandler(ModeHandler):
+    """Handles candle processing mode"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.gcs_bucket = config.gcp.bucket
+    
+    async def run(self, start_date, end_date, venues, instrument_types, data_types, **kwargs):
+        """Process historical candles for date range"""
+        
+        logger.info(f"🕯️ Starting candle processing from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        # Import here to avoid circular imports
+        from src.data_client.data_client import DataClient
+        from src.candle_processor.historical_candle_processor import HistoricalCandleProcessor, ProcessingConfig
+        from src.candle_processor.aggregated_candle_processor import AggregatedCandleProcessor, AggregationConfig
+        from src.candle_processor.book_snapshot_processor import BookSnapshotProcessor, BookSnapshotConfig
+        
+        # Initialize components
+        data_client = DataClient(self.gcs_bucket, self.config)
+        
+        # Configure processors
+        processing_config = ProcessingConfig(
+            timeframes=['15s', '1m'],
+            enable_hft_features=True,
+            enable_book_snapshots=True,
+            data_types=data_types
+        )
+        
+        aggregation_config = AggregationConfig(
+            timeframes=['5m', '15m', '1h', '4h', '24h'],
+            enable_hft_features=True
+        )
+        
+        book_config = BookSnapshotConfig(
+            timeframes=['15s', '1m', '5m', '15m', '1h', '4h', '24h'],
+            levels=5
+        )
+        
+        # Initialize processors
+        historical_processor = HistoricalCandleProcessor(data_client, processing_config)
+        aggregated_processor = AggregatedCandleProcessor(data_client, aggregation_config)
+        book_processor = BookSnapshotProcessor(data_client, book_config)
+        
+        # Get list of instruments to process
+        # This would need to be implemented based on your instrument selection logic
+        instruments = await self._get_instruments_to_process(venues, instrument_types, start_date, end_date)
+        
+        results = {
+            'start_date': start_date.strftime('%Y-%m-%d'),
+            'end_date': end_date.strftime('%Y-%m-%d'),
+            'instruments_processed': 0,
+            'total_candles_generated': 0,
+            'errors': []
+        }
+        
+        # Process each day
+        current_date = start_date
+        while current_date <= end_date:
+            logger.info(f"📅 Processing {current_date.strftime('%Y-%m-%d')}")
+            
+            for instrument_id in instruments:
+                try:
+                    # Process historical candles (15s, 1m)
+                    historical_result = await historical_processor.process_day(
+                        instrument_id, current_date, self.gcs_bucket
+                    )
+                    
+                    # Process aggregated candles (5m, 15m, 1h, 4h, 24h)
+                    aggregated_result = await aggregated_processor.process_day(
+                        instrument_id, current_date, self.gcs_bucket
+                    )
+                    
+                    # Process book snapshots
+                    book_result = await book_processor.process_day(
+                        instrument_id, current_date, self.gcs_bucket
+                    )
+                    
+                    # Aggregate results
+                    results['instruments_processed'] += 1
+                    results['total_candles_generated'] += (
+                        sum(tf.get('candle_count', 0) for tf in historical_result['timeframes'].values()) +
+                        sum(tf.get('candle_count', 0) for tf in aggregated_result['timeframes'].values()) +
+                        sum(tf.get('snapshot_count', 0) for tf in book_result['timeframes'].values())
+                    )
+                    
+                    results['errors'].extend(historical_result.get('errors', []))
+                    results['errors'].extend(aggregated_result.get('errors', []))
+                    results['errors'].extend(book_result.get('errors', []))
+                    
+                except Exception as e:
+                    error_msg = f"Failed to process {instrument_id} on {current_date.strftime('%Y-%m-%d')}: {e}"
+                    logger.error(error_msg)
+                    results['errors'].append(error_msg)
+            
+            # Move to next day
+            from datetime import timedelta
+            current_date += timedelta(days=1)
+        
+        logger.info(f"✅ Candle processing completed: {results['instruments_processed']} instruments, {results['total_candles_generated']} candles generated")
+        return results
+    
+    async def _get_instruments_to_process(self, venues, instrument_types, start_date, end_date):
+        """Get list of instruments to process - placeholder implementation"""
+        # This would need to be implemented based on your instrument selection logic
+        # For now, return a placeholder
+        return ['BINANCE:SPOT_PAIR:BTC-USDT', 'BINANCE:SPOT_PAIR:ETH-USDT']
+
+class StreamingTicksHandler(ModeHandler):
+    """Handles streaming raw tick data to BigQuery"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+    
+    async def run(self, symbol: str = 'BTC-USDT', duration: int = 300, **kwargs):
+        """Start Node.js tick streaming service"""
+        import subprocess
+        import os
+        
+        # Change to streaming directory
+        streaming_dir = Path(__file__).parent.parent / 'streaming'
+        if not streaming_dir.exists():
+            raise FileNotFoundError(f"Streaming directory not found: {streaming_dir}")
+        
+        # Set environment variables
+        env = os.environ.copy()
+        env.update({
+            'GCP_PROJECT_ID': self.config.gcp.project_id,
+            'GOOGLE_APPLICATION_CREDENTIALS': self.config.gcp.credentials_path,
+            'BIGQUERY_DATASET': 'market_data_streaming'
+        })
+        
+        # Build command
+        cmd = ['node', 'live_tick_streamer.js', '--mode', 'ticks', '--symbol', symbol]
+        if duration > 0:
+            cmd.extend(['--duration', str(duration)])
+        
+        logger.info(f"🚀 Starting tick streaming for {symbol}")
+        logger.info(f"📡 Command: {' '.join(cmd)}")
+        
+        try:
+            # Run Node.js streaming service
+            process = subprocess.Popen(
+                cmd,
+                cwd=streaming_dir,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True
+            )
+            
+            # Stream output
+            for line in process.stdout:
+                print(line.rstrip())
+            
+            process.wait()
+            return {'status': 'completed', 'symbol': symbol, 'duration': duration}
+            
+        except Exception as e:
+            logger.error(f"❌ Error running tick streaming: {e}")
+            raise
+
+class StreamingCandlesHandler(ModeHandler):
+    """Handles streaming real-time candles with HFT features"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+    
+    async def run(self, symbol: str = 'BTC-USDT', duration: int = 300, **kwargs):
+        """Start Node.js candle streaming service"""
+        import subprocess
+        import os
+        
+        # Change to streaming directory
+        streaming_dir = Path(__file__).parent.parent / 'streaming'
+        if not streaming_dir.exists():
+            raise FileNotFoundError(f"Streaming directory not found: {streaming_dir}")
+        
+        # Set environment variables
+        env = os.environ.copy()
+        env.update({
+            'GCP_PROJECT_ID': self.config.gcp.project_id,
+            'GOOGLE_APPLICATION_CREDENTIALS': self.config.gcp.credentials_path,
+            'BIGQUERY_DATASET': 'market_data_streaming'
+        })
+        
+        # Build command
+        cmd = ['node', 'live_tick_streamer.js', '--mode', 'candles', '--symbol', symbol]
+        if duration > 0:
+            cmd.extend(['--duration', str(duration)])
+        
+        logger.info(f"🕯️ Starting candle streaming for {symbol}")
+        logger.info(f"📡 Command: {' '.join(cmd)}")
+        
+        try:
+            # Run Node.js streaming service
+            process = subprocess.Popen(
+                cmd,
+                cwd=streaming_dir,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                universal_newlines=True
+            )
+            
+            # Stream output
+            for line in process.stdout:
+                print(line.rstrip())
+            
+            process.wait()
+            return {'status': 'completed', 'symbol': symbol, 'duration': duration}
+            
+        except Exception as e:
+            logger.error(f"❌ Error running candle streaming: {e}")
+            raise
+
+class BigQueryUploadHandler(ModeHandler):
+    """Handles BigQuery upload mode"""
+    
+    def __init__(self, config):
+        super().__init__(config)
+        self.gcs_bucket = config.gcp.bucket
+    
+    async def run(self, start_date, end_date, venues, instrument_types, data_types, **kwargs):
+        """Upload processed candles to BigQuery"""
+        
+        logger.info(f"📤 Starting BigQuery upload from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        # Import here to avoid circular imports
+        from src.data_client.data_client import DataClient
+        from src.bigquery_uploader.candle_uploader import CandleUploader, UploadConfig
+        from src.bigquery_uploader.upload_orchestrator import UploadOrchestrator, OrchestrationConfig
+        
+        # Initialize components
+        data_client = DataClient(self.gcs_bucket, self.config)
+        
+        # Configure upload
+        upload_config = UploadConfig(
+            project_id=self.config.gcp.project_id,
+            dataset_id="market_data_candles",
+            timeframes=['15s', '1m', '5m', '15m', '1h', '4h', '24h'],
+            batch_size=1000
+        )
+        
+        orchestration_config = OrchestrationConfig(
+            max_concurrent_days=5,
+            max_concurrent_timeframes=3,
+            retry_failed_days=True
+        )
+        
+        # Initialize uploader
+        uploader = CandleUploader(data_client, upload_config)
+        orchestrator = UploadOrchestrator(data_client, upload_config, orchestration_config)
+        
+        # Upload data
+        result = await orchestrator.upload_date_range(
+            start_date=start_date,
+            end_date=end_date,
+            timeframes=upload_config.timeframes,
+            overwrite=False
+        )
+        
+        logger.info(f"✅ BigQuery upload completed: {result['successful_days']}/{result['total_days']} days successful, {result['total_rows_uploaded']} rows uploaded")
+        return result
+
+
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -670,39 +1101,49 @@ def parse_arguments():
         epilog="""
 Examples:
   # Generate instrument definitions
-  python -m src.main --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
+  python -m market_data_tick_handler.main. --mode instruments --start-date 2023-05-23 --end-date 2023-05-25
   
   # Download tick data
-  python -m src.main --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit --data-types trades book_snapshot_5
+  python -m market_data_tick_handler.main. --mode download --start-date 2023-05-23 --end-date 2023-05-25 --venues deribit --data-types trades book_snapshot_5
   
   # Run full pipeline
-  python -m src.main --mode full-pipeline --start-date 2023-05-23 --end-date 2023-05-25
+  python -m market_data_tick_handler.main. --mode full-pipeline-ticks --start-date 2023-05-23 --end-date 2023-05-25
   
   # Use environment file
-  python -m src.main --mode instruments --env-file .env.production
+  python -m market_data_tick_handler.main. --mode instruments --env-file .env.production
         """
     )
     
     # Mode selection
     parser.add_argument(
         '--mode', 
-        choices=['instruments', 'missing-reports', 'download', 'validate', 'check-gaps', 'full-pipeline'],
+        choices=['instruments', 'missing-tick-reports', 'download', 'validate', 'check-gaps', 'full-pipeline-ticks', 'candle-processing', 'bigquery-upload', 'streaming-ticks', 'streaming-candles'],
         required=True,
-        help='Operation mode: instruments (generate definitions), missing-reports (generate missing data reports), download (download only missing data), validate (check missing data), check-gaps (check file existence gaps), full-pipeline (complete flow)'
+        help='Operation mode: instruments (generate definitions), missing-tick-reports (generate missing data reports), download (download missing data by default, use --force to override), validate (check missing data), check-gaps (check file existence gaps), full-pipeline-ticks (complete flow), candle-processing (generate historical candles), bigquery-upload (upload candles to BigQuery), streaming-ticks (stream raw tick data to BigQuery), streaming-candles (stream real-time candles with HFT features)'
     )
     
     # Date range
     parser.add_argument(
         '--start-date',
         type=str,
-        required=True,
-        help='Start date in YYYY-MM-DD format'
+        help='Start date in YYYY-MM-DD format (required for batch modes, optional for streaming)'
     )
     parser.add_argument(
         '--end-date',
         type=str,
-        required=True,
-        help='End date in YYYY-MM-DD format'
+        help='End date in YYYY-MM-DD format (required for batch modes, optional for streaming)'
+    )
+    
+    # Streaming specific options
+    parser.add_argument(
+        '--symbol',
+        type=str,
+        help='Trading symbol for streaming modes (e.g., BTC-USDT)'
+    )
+    parser.add_argument(
+        '--duration',
+        type=int,
+        help='Duration in seconds for streaming (0 = infinite)'
     )
     
     # Configuration
@@ -744,11 +1185,17 @@ Examples:
         help='Maximum number of instruments to process'
     )
     parser.add_argument(
+        '--force-download',
+        action='store_true',
+        help='Force download even if data already exists (overrides missing data check)'
+    )
+    parser.add_argument(
         '--max-workers',
         type=int,
         default=4,
         help='Maximum number of worker threads for parallel processing (default: 4)'
     )
+    
     
     # Sharding options
     parser.add_argument(
@@ -827,12 +1274,50 @@ async def main():
         # Load configuration
         config = get_config()
         
-        # Parse dates
-        start_date = parse_date(args.start_date)
-        end_date = parse_date(args.end_date)
+        # Parse dates (required for batch modes, optional for streaming)
+        if args.mode not in ['streaming-ticks', 'streaming-candles']:
+            if not args.start_date:
+                raise ValueError("--start-date is required for this mode")
+            if not args.end_date:
+                raise ValueError("--end-date is required for this mode")
+            
+        # Parse dates for batch modes
+        if args.mode not in ['streaming-ticks', 'streaming-candles']:
+            start_date = parse_date(args.start_date)
+            end_date = parse_date(args.end_date)
+            
+            if start_date > end_date:
+                raise ValueError("Start date must be before or equal to end date")
+        else:
+            # For streaming modes, dates are not used
+            start_date = None
+            end_date = None
         
-        if start_date > end_date:
-            raise ValueError("Start date must be before or equal to end date")
+        # Set defaults for venues and data types if not provided
+        # Use canonical venue names as single source of truth
+        default_venues = ['BINANCE', 'BINANCE-FUTURES', 'DERIBIT', 'BYBIT', 'BYBIT-SPOT', 'OKX', 'OKX-FUTURES', 'OKX-SWAP']
+        default_data_types = ['trades', 'book_snapshot_5', 'derivative_ticker', 'liquidations', 'options_chain']
+        
+        venues = args.venues if args.venues else default_venues
+        data_types = args.data_types if args.data_types else default_data_types
+        
+        # Convert canonical venues to Tardis exchange names for instrument generation
+        venue_to_exchange_mapping = {
+            'BINANCE': 'binance',
+            'BINANCE-FUTURES': 'binance-futures',
+            'DERIBIT': 'deribit',
+            'BYBIT': 'bybit',
+            'BYBIT-SPOT': 'bybit-spot',
+            'OKX': 'okex',
+            'OKX-FUTURES': 'okex-futures',
+            'OKX-SWAP': 'okex-swap'
+        }
+        exchanges = [venue_to_exchange_mapping.get(venue, venue.lower()) for venue in venues]
+        
+        logger.info(f"🏢 Using venues: {venues}")
+        logger.info(f"📊 Using data types: {data_types}")
+        if args.mode == 'instruments':
+            logger.info(f"🔄 Using exchanges: {exchanges}")
         
         # Create appropriate handler based on mode
         if args.mode == 'instruments':
@@ -840,50 +1325,88 @@ async def main():
             result = await handler.run(
                 start_date=start_date,
                 end_date=end_date,
-                exchanges=args.exchanges,
+                exchanges=exchanges,
                 max_workers=args.max_workers
             )
         elif args.mode == 'download':
-            # Standard download mode now uses missing data by default
-            handler = MissingDataDownloadHandler(config)
+            # Download mode with missing data checking (default) or force download
+            handler = TickDataDownloadHandler(config)
             result = await handler.run(
                 start_date=start_date,
                 end_date=end_date,
-                venues=args.venues,
+                venues=venues,
                 instrument_types=args.instrument_types,
-                data_types=args.data_types,
+                data_types=data_types,
                 max_instruments=args.max_instruments,
                 shard_index=args.shard_index,
-                total_shards=args.total_shards
+                total_shards=args.total_shards,
+                force_download=args.force_download
             )
         elif args.mode == 'validate':
             handler = DataValidationHandler(config)
             result = await handler.run(
                 start_date=start_date,
                 end_date=end_date,
-                venues=args.venues,
+                venues=venues,
                 instrument_types=args.instrument_types,
-                data_types=args.data_types
+                data_types=data_types
+            )
+        elif args.mode == 'missing-tick-reports':
+            handler = MissingReportsHandler(config)
+            result = await handler.run(
+                start_date=start_date,
+                end_date=end_date,
+                venues=venues,
+                instrument_types=args.instrument_types,
+                data_types=data_types
             )
         elif args.mode == 'check-gaps':
             handler = CheckGapsHandler(config)
             result = await handler.run(
                 start_date=start_date,
                 end_date=end_date,
-                venues=args.venues,
+                venues=venues,
                 instrument_types=args.instrument_types,
-                data_types=args.data_types
+                data_types=data_types
             )
-        elif args.mode == 'full-pipeline':
+        elif args.mode == 'full-pipeline-ticks':
             handler = FullPipelineHandler(config)
             result = await handler.run(
                 start_date=start_date,
                 end_date=end_date,
                 exchanges=args.exchanges,
-                venues=args.venues,
+                venues=venues,
                 instrument_types=args.instrument_types,
-                data_types=args.data_types
+                data_types=data_types
             )
+        elif args.mode == 'candle-processing':
+            handler = CandleProcessingHandler(config)
+            result = await handler.run(
+                start_date=start_date,
+                end_date=end_date,
+                venues=venues,
+                instrument_types=args.instrument_types,
+                data_types=data_types
+            )
+        elif args.mode == 'bigquery-upload':
+            handler = BigQueryUploadHandler(config)
+            result = await handler.run(
+                start_date=start_date,
+                end_date=end_date,
+                venues=venues,
+                instrument_types=args.instrument_types,
+                data_types=data_types
+            )
+        elif args.mode == 'streaming-ticks':
+            handler = StreamingTicksHandler(config)
+            symbol = args.symbol or 'BTC-USDT'
+            duration = args.duration or 300
+            result = await handler.run(symbol=symbol, duration=duration)
+        elif args.mode == 'streaming-candles':
+            handler = StreamingCandlesHandler(config)
+            symbol = args.symbol or 'BTC-USDT'
+            duration = args.duration or 300
+            result = await handler.run(symbol=symbol, duration=duration)
         else:
             raise ValueError(f"Unknown mode: {args.mode}")
         
