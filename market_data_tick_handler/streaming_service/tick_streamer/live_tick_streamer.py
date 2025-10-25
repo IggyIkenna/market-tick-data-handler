@@ -23,7 +23,7 @@ sys.path.append(str(project_root))
 from market_data_tick_handler.utils.logger import setup_structured_logging
 from market_data_tick_handler.streaming_service.tick_streamer.utc_timestamp_manager import UTCTimestampManager, TimestampPair
 from market_data_tick_handler.streaming_service.bigquery_client.streaming_client import BigQueryStreamingClient
-from market_data_tick_handler.streaming_service.candle_processor.multi_timeframe_processor import MultiTimeframeProcessor
+# Import MultiTimeframeProcessor lazily to avoid circular imports
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,8 @@ class LiveTickStreamer:
             self.candle_processor = None
         elif config.mode == 'candles':
             self.bigquery_client = None
+            # Import MultiTimeframeProcessor lazily to avoid circular imports
+            from market_data_tick_handler.streaming_service.candle_processor.multi_timeframe_processor import MultiTimeframeProcessor
             self.candle_processor = MultiTimeframeProcessor(
                 symbol=config.symbol,
                 exchange=config.exchange,

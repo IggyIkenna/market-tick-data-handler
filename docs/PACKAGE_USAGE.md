@@ -36,8 +36,16 @@ The system provides two distinct service tiers:
 - **Mode**: Package/library for downstream services
 - **Use Cases**: Features service, execution service, backtesting, order book analytics
 - **Data**: Filtered, real-time, and historical data for specific instruments
-- **Special Features**: Options chain features, underlying instrument filtering
+- **Special Features**: Options chain features, underlying instrument filtering, **UNIFIED streaming architecture**
 - **Instrument Filtering**: All services filter for specific instruments they need (streaming or historical)
+
+#### ✅ NEW: Unified Streaming Service (v2.0.0)
+The streaming service is now **fully integrated** into the package with:
+- **8 data types supported** with fallback strategies (Issue #003 SOLVED)
+- **Live CCXT instruments** from 8 exchanges (Issue #004 SOLVED)  
+- **Unified HFT features** - same code for historical and live processing
+- **Mode separation** - serve mode (importable) + persist mode (BigQuery)
+- **Optimized BigQuery** - exchange/symbol clustering + time partitioning
 
 ## Complete Data Pipeline & Package Usage
 
@@ -396,11 +404,52 @@ For analytics services that need to stream tick data to BigQuery:
 
 #### Option A: Python Package Streaming Mode
 ```bash
-# Stream raw tick data to BigQuery
-python -m market_data_tick_handler.main. --mode streaming-ticks --symbol BTC-USDT --duration 300
+# NEW: Unified Streaming Architecture (v2.0.0)
 
-# Stream real-time candles with HFT features
-python -m market_data_tick_handler.main. --mode streaming-candles --symbol BTC-USDT --duration 300
+# Stream raw tick data to BigQuery (8 data types with fallbacks)
+python -m market_data_tick_handler.main --mode streaming-ticks-bigquery --symbol BTC-USDT --duration 300
+
+# Stream candles + HFT features for downstream services (importable)
+python -m market_data_tick_handler.main --mode streaming-candles-serve --symbol BTC-USDT --duration 0
+
+# Stream candles + HFT features to BigQuery for analytics  
+python -m market_data_tick_handler.main --mode streaming-candles-bigquery --symbol BTC-USDT --duration 0
+
+# Sync live instrument definitions from CCXT (8 exchanges)
+python -m market_data_tick_handler.main --mode live-instruments-sync --exchanges binance,deribit
+```
+
+#### Unified Streaming Service Usage
+```python
+# Import unified streaming components
+from market_data_tick_handler.streaming_service import (
+    LiveFeatureStream,      # Consumer interface
+    ServeMode,             # Publishing features
+    PersistMode,           # BigQuery persistence  
+    LiveInstrumentProvider, # Live CCXT instruments
+    HFTFeatureCalculator   # Unified features (historical + live)
+)
+
+# Consume live features in downstream service
+async with LiveFeatureStream(symbol="BTC-USDT", timeframe="1m") as stream:
+    async for candle_with_features in stream:
+        # Use HFT features in trading strategy
+        if candle_with_features['hft_features']['rsi_5'] < 30:
+            execute_buy_signal(candle_with_features)
+
+# Get live instrument definitions with trading parameters
+provider = LiveInstrumentProvider()
+await provider.start()
+btc_usdt = await provider.get_instrument("binance", "BTC/USDT")
+print(f"Tick size: {btc_usdt.tick_size}")  # Real-time from CCXT
+print(f"Trading fee: {btc_usdt.trading_fees_taker}")
+
+# Unified HFT features (same code for historical + live)
+calc = HFTFeatureCalculator("BTC-USDT")
+# Historical batch processing
+features_list = await calc.compute_batch(candles_df, timeframe="1m")
+# Live incremental processing  
+features = await calc.compute_incremental(candle_data)
 ```
 
 #### Option B: Direct Package Usage

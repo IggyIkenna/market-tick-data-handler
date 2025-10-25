@@ -112,19 +112,29 @@ deploy_vm() {
 #!/bin/bash
 set -e
 
+echo "Starting VM setup..."
+
 # Update system
 apt-get update
-apt-get install -y docker.io
+apt-get install -y git python3 python3-pip
 
-# Start Docker service
-systemctl start docker
-systemctl enable docker
+# Install Google Cloud SDK
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+apt-get update && apt-get install -y google-cloud-cli
 
-# Add user to docker group
-usermod -aG docker $USER
+# Create application directory
+mkdir -p /opt/market-tick-data-handler
+cd /opt/market-tick-data-handler
 
-# Pull the Docker image
-docker pull asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-tardis-downloader:latest
+# Clone repository
+echo "Cloning repository..."
+git clone https://github.com/IggyIkenna/market-tick-data-handler.git .
+
+# Install Python dependencies
+echo "Installing Python dependencies..."
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
 
 # Create log directory
 mkdir -p /var/log/market-data
@@ -372,10 +382,8 @@ run_missing_reports() {
     if check_vm_exists; then
         VM_STATUS=$(get_vm_status)
         if [ "$VM_STATUS" = "RUNNING" ]; then
-            # Build command
-            local cmd="docker run --rm -v /var/log/market-data:/app/logs"
-            cmd="$cmd asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-tardis-downloader:latest"
-            cmd="$cmd python -m market_data_tick_handler.main --mode missing-reports"
+            # Build command to run Python package directly
+            local cmd="cd /opt/market-tick-data-handler && python3 -m market_data_tick_handler.main --mode missing-reports"
             cmd="$cmd --start-date $start_date --end-date $end_date"
             
             if [ -n "$venues" ]; then

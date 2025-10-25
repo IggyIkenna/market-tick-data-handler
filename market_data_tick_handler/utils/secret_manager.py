@@ -38,13 +38,35 @@ class SecretManagerClient:
                 # Use explicit credentials file
                 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
                 logger.info(f"Using credentials from: {credentials_path}")
+            elif credentials_path:
+                logger.error(f"Specified credentials file does not exist: {credentials_path}")
+                if credentials_path == "central-element-323112-e35fb0ddafe2.json":
+                    logger.error("Missing credentials file 'central-element-323112-e35fb0ddafe2.json'")
+                    logger.error("Try restoring it with: bash scripts/restore-credentials.sh")
+                logger.info("Attempting to use default credentials")
+            else:
+                logger.info("No explicit credentials path provided, using default authentication")
             
             self.client = secretmanager.SecretManagerServiceClient()
             logger.info("Secret Manager client initialized successfully")
             
+            # Test authentication by attempting to list secrets (without actually retrieving them)
+            try:
+                parent = f"projects/{self.project_id}"
+                # Just get the first page to test authentication
+                secrets_iter = self.client.list_secrets(request={"parent": parent, "page_size": 1})
+                next(secrets_iter, None)  # Try to get first secret (or None if empty)
+                logger.info("Secret Manager authentication verified")
+            except Exception as auth_test_error:
+                logger.warning(f"Secret Manager authentication test failed: {auth_test_error}")
+                # Don't set client to None here - the actual secret retrieval might still work
+            
         except DefaultCredentialsError as e:
-            logger.warning(f"Failed to initialize Secret Manager client: {e}")
-            logger.warning("Falling back to environment variables")
+            logger.error(f"Google Cloud credentials not found or invalid: {e}")
+            logger.error("Possible solutions:")
+            logger.error("1. Restore the credentials file: bash scripts/restore-credentials.sh")
+            logger.error("2. Ensure GOOGLE_APPLICATION_CREDENTIALS points to central-element-323112-e35fb0ddafe2.json")
+            logger.error("3. Run 'gcloud auth application-default login'")
             self.client = None
         except Exception as e:
             logger.error(f"Unexpected error initializing Secret Manager client: {e}")
@@ -62,12 +84,13 @@ class SecretManagerClient:
             Secret value as string, or None if not found
         """
         if not self.client:
-            logger.warning("Secret Manager client not available")
+            logger.error("Secret Manager client not available - cannot retrieve secrets")
             return None
         
         try:
             # Construct the resource name
             secret_path = f"projects/{self.project_id}/secrets/{secret_name}/versions/{version}"
+            logger.debug(f"Attempting to retrieve secret from path: {secret_path}")
             
             # Access the secret version
             response = self.client.access_secret_version(request={"name": secret_path})
@@ -78,13 +101,26 @@ class SecretManagerClient:
             return secret_value
             
         except gcp_exceptions.NotFound:
-            logger.warning(f"Secret not found: {secret_name}")
+            logger.error(f"Secret not found in Secret Manager: {secret_name} (project: {self.project_id})")
+            logger.error("Please verify the secret name exists and check your access permissions")
             return None
         except gcp_exceptions.PermissionDenied:
-            logger.error(f"Permission denied accessing secret: {secret_name}")
+            logger.error(f"Permission denied accessing secret: {secret_name} (project: {self.project_id})")
+            logger.error("Possible solutions:")
+            logger.error("1. Ensure your service account has 'Secret Manager Secret Accessor' role")
+            logger.error("2. Restore credentials file: bash scripts/restore-credentials.sh")
+            logger.error("3. Check if central-element-323112-e35fb0ddafe2.json exists in project root")
+            return None
+        except gcp_exceptions.Unauthenticated:
+            logger.error(f"Authentication failed when accessing secret: {secret_name}")
+            logger.error("Possible solutions:")
+            logger.error("1. Restore credentials file: bash scripts/restore-credentials.sh")
+            logger.error("2. Check if central-element-323112-e35fb0ddafe2.json exists in project root")
+            logger.error("3. Run 'gcloud auth application-default login'")
             return None
         except Exception as e:
-            logger.error(f"Error retrieving secret {secret_name}: {e}")
+            logger.error(f"Unexpected error retrieving secret {secret_name}: {e}")
+            logger.error(f"Secret path attempted: {secret_path}")
             return None
     
     def get_secrets(self, secret_names: list, version: str = "latest") -> Dict[str, Optional[str]]:
@@ -122,27 +158,45 @@ def get_tardis_api_key(
     Returns:
         API key string, or None if not found
     """
+    logger.info(f"Attempting to retrieve Tardis API key (secret: {secret_name}, project: {project_id})")
+    
     # Try Secret Manager first
     try:
         secret_client = SecretManagerClient(project_id, credentials_path)
-        api_key = secret_client.get_secret(secret_name)
-        
-        if api_key:
-            logger.info("Retrieved Tardis API key from Secret Manager")
-            return api_key
+        if secret_client.client is None:
+            logger.warning("Secret Manager client initialization failed - skipping Secret Manager lookup")
         else:
-            logger.warning(f"Secret {secret_name} not found in Secret Manager")
+            api_key = secret_client.get_secret(secret_name)
+            
+            if api_key:
+                logger.info("Retrieved Tardis API key from Secret Manager")
+                # Validate the key format
+                if api_key.startswith('TD.'):
+                    return api_key
+                else:
+                    logger.warning(f"Retrieved secret doesn't match expected Tardis API key format (should start with 'TD.')")
+                    return api_key  # Return it anyway, let validation handle the error
+            else:
+                logger.warning(f"Secret {secret_name} not found in Secret Manager or returned None")
             
     except Exception as e:
-        logger.warning(f"Failed to retrieve secret from Secret Manager: {e}")
+        logger.error(f"Exception during Secret Manager retrieval: {e}")
+        logger.info("Falling back to environment variable")
     
     # Fallback to environment variable
+    logger.info(f"Attempting to retrieve Tardis API key from environment variable: {fallback_env_var}")
     api_key = os.getenv(fallback_env_var)
     if api_key:
         logger.info(f"Retrieved Tardis API key from environment variable: {fallback_env_var}")
         return api_key
+    else:
+        logger.warning(f"Environment variable {fallback_env_var} not set or empty")
     
-    logger.error(f"Tardis API key not found in Secret Manager or environment variable: {fallback_env_var}")
+    logger.error(f"Tardis API key not found in Secret Manager (secret: {secret_name}) or environment variable ({fallback_env_var})")
+    logger.error("Possible solutions:")
+    logger.error("1. Restore credentials file: bash scripts/restore-credentials.sh")
+    logger.error("2. Check if central-element-323112-e35fb0ddafe2.json exists in project root")
+    logger.error("3. Set TARDIS_API_KEY environment variable")
     return None
 
 

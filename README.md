@@ -1,6 +1,10 @@
 # Market Tick Data Handler
 
+<<<<<<< Current (Your changes)
 A high-performance system for downloading, processing, and storing cryptocurrency tick data from Tardis.dev into Google Cloud Storage. Now refactored as a clean internal package/library for downstream services.
+=======
+A high-performance system for downloading, processing, and storing cryptocurrency tick data from Tardis.dev into Google Cloud Storage, with comprehensive validation framework and real-time streaming integration.
+>>>>>>> Incoming (Background Agent changes)
 
 ## 🚀 Quick Installation
 
@@ -169,13 +173,36 @@ candles = candle_reader.get_candles(
 )
 ```
 
-#### Real-Time Streaming
+#### Real-Time Streaming (Unified v2.0.0)
 ```bash
-# Stream raw tick data to BigQuery
-python -m market_data_tick_handler.main. --mode streaming-ticks --symbol BTC-USDT --duration 300
+# NEW: Unified Streaming Architecture
 
-# Stream real-time candles with HFT features
-python -m market_data_tick_handler.main. --mode streaming-candles --symbol BTC-USDT --duration 0
+# Stream raw tick data to BigQuery (8 data types with fallbacks) 
+python -m market_data_tick_handler.main --mode streaming-ticks-bigquery --symbol BTC-USDT --duration 300
+
+# Stream candles + HFT features for downstream services (importable)
+python -m market_data_tick_handler.main --mode streaming-candles-serve --symbol BTC-USDT --duration 0
+
+# Stream candles + HFT features to BigQuery for analytics
+python -m market_data_tick_handler.main --mode streaming-candles-bigquery --symbol BTC-USDT --duration 0
+
+# Sync live instrument definitions from CCXT (8 exchanges)
+python -m market_data_tick_handler.main --mode live-instruments-sync --exchanges binance,deribit
+```
+
+#### Package Integration (NEW)
+```python
+# Import unified streaming components
+from market_data_tick_handler.streaming_service import (
+    LiveFeatureStream,      # Consumer interface
+    LiveInstrumentProvider, # Live CCXT instruments  
+    HFTFeatureCalculator   # Unified features (historical + live)
+)
+
+# Consume live features in downstream service
+async with LiveFeatureStream(symbol="BTC-USDT", timeframe="1m") as stream:
+    async for candle_with_features in stream:
+        execute_strategy(candle_with_features)
 ```
 
 See [Package Usage Guide](docs/PACKAGE_USAGE.md) for detailed examples.
@@ -629,6 +656,56 @@ blob = bucket.blob('instrument_availability/by_date/day-2023-05-23/instruments.p
 blob.download_to_filename('instruments.parquet')
 instruments = pd.read_parquet('instruments.parquet')
 ```
+
+## 🔍 Validation Framework
+
+### Comprehensive Data Validation
+
+The system includes a robust validation framework for ensuring data quality and consistency:
+
+- **Cross-Source Validation**: Compare Binance vs Tardis data
+- **Timestamp Stability**: Validate timestamp consistency and ordering
+- **Aggregation Consistency**: Verify candle aggregation correctness
+- **Real-time Streaming Validation**: Validate streaming data in real-time
+
+### Quick Validation Test
+
+```bash
+# Run all validation tests
+python run_validation_tests.py --test-type all
+
+# Run specific validation types
+python run_validation_tests.py --test-type cross-source --symbol BTC-USDT --timeframe 1m
+python run_validation_tests.py --test-type timestamp --data-file data.parquet
+python run_validation_tests.py --test-type aggregation --base-file 1m.parquet --agg-file 5m.parquet
+```
+
+### Streaming Integration
+
+Real-time validation integration with the unified streaming architecture:
+
+```python
+from src.validation.streaming_integration import StreamingServiceValidator
+
+# Create streaming validator
+validator = StreamingServiceValidator(
+    cross_source_validator=cross_source_validator,
+    timestamp_validator=timestamp_validator,
+    aggregation_validator=aggregation_validator
+)
+
+# Start validator
+await validator.start()
+
+# Validate streaming candle
+result = await validator.validate_candle(candle, "BTC-USDT", "1m")
+```
+
+### Validation Documentation
+
+- [Validation Framework Guide](docs/VALIDATION_FRAMEWORK_README.md)
+- [Streaming Integration Guide](docs/STREAMING_VALIDATION_INTEGRATION.md)
+- [Testing Analysis](docs/TESTING_ANALYSIS.md)
 
 ## 🧪 Testing
 

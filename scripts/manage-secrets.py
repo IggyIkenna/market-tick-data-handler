@@ -16,7 +16,7 @@ from typing import Dict, Any, Optional
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.utils.secret_manager_utils import SecretManagerUtils
+from market_data_tick_handler.utils.secret_manager_utils import SecretManagerUtils
 from config import get_config
 
 

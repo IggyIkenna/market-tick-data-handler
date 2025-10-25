@@ -1,13 +1,28 @@
-# Market Data Streaming Service Guide
+# Unified Streaming Service Guide
 
 ## Overview
 
-The Market Data Streaming Service provides two distinct modes for processing real-time cryptocurrency market data using Node.js for optimal WebSocket performance:
+The Market Data Streaming Service has been **architecturally unified** into a consolidated design that eliminates duplication and provides clear separation of concerns.
 
-1. **Raw Tick Streaming** (`ticks` mode) - Streams raw tick data to BigQuery for analytics
-2. **Multi-Timeframe Candle Processing** (`candles` mode) - Processes ticks into multiple timeframes with HFT features
+🚧 **CURRENT STATUS**: All components are implemented but integration is still in progress. See [STREAMING_IMPLEMENTATION_STATUS.md](STREAMING_IMPLEMENTATION_STATUS.md) for detailed status.
 
-> **Note**: This service is now integrated into the local development workflow and is not VM-deployed. Use `./deploy/local/run-main.sh streaming-ticks` or `./deploy/local/run-main.sh streaming-candles` for local development and testing.
+### Unified Architecture (v2.0.0)
+
+**Core Principle**: One codebase for HFT features (Python) + Node.js for WebSocket ingestion
+
+**Streaming Modes**:
+1. **`streaming-ticks-bigquery`** - Raw tick data to BigQuery (8 data types)
+2. **`streaming-candles-serve`** - Real-time candles + HFT features → importable by services  
+3. **`streaming-candles-bigquery`** - Real-time candles + HFT features → BigQuery
+4. **`live-instruments-sync`** - Live CCXT instrument definitions (8 exchanges)
+
+### Key Features
+- ✅ **Unified HFT Features**: Same code for historical AND live processing
+- ✅ **Complete Data Type Support**: 8 data types with fallback strategies (Issue #003 SOLVED)
+- ✅ **Live CCXT Instruments**: Real-time trading parameters from 8 exchanges (Issue #004 SOLVED)
+- ✅ **BigQuery Optimization**: Exchange/symbol clustering + optimized partitioning
+- ✅ **Mode Separation**: Serve mode (importable) + Persist mode (BigQuery)
+- ✅ **Package Integration**: Full integration with `market_data_tick_handler`
 
 ## Architecture
 

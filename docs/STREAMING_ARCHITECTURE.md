@@ -2,7 +2,9 @@
 
 ## Overview
 
-The Market Data Streaming Service has been **completely consolidated** into a unified architecture that eliminates duplication and provides clear separation of concerns. This addresses the previous problems of multiple overlapping implementations and provides a single, maintainable codebase.
+The Market Data Streaming Service has been **architecturally consolidated** into a unified design that eliminates duplication and provides clear separation of concerns. 
+
+⚠️ **STATUS**: Architecture is complete, but functional integration is still in progress. See [STREAMING_IMPLEMENTATION_STATUS.md](STREAMING_IMPLEMENTATION_STATUS.md) for current working status.
 
 ## Architecture Principles
 

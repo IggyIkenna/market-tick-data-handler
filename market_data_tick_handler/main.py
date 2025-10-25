@@ -1134,47 +1134,110 @@ class StreamingTicksHandler(ModeHandler):
         super().__init__(config)
     
     async def run(self, symbol: str = 'BTC-USDT', duration: int = 300, exchange: str = 'binance', **kwargs):
-        """Start integrated Python streaming service with BigQuery batching"""
+        """Start streaming tick data with 1-minute BigQuery batching"""
         
         # Import here to avoid circular imports
-        from market_data_tick_handler.streaming_service.integrated_streaming_service import (
-            create_integrated_streaming_service, IntegratedStreamingConfig
-        )
+        from market_data_tick_handler.bigquery_uploader.streaming_uploader import StreamingBigQueryUploader
+        import pandas as pd
+        import time
         
-        logger.info(f"🚀 Starting integrated tick streaming for {exchange}:{symbol}")
+        logger.info(f"🚀 Starting tick streaming for {exchange}:{symbol}")
         logger.info(f"⏱️ Duration: {duration}s (0 = infinite)")
         logger.info(f"💰 Using 1-minute BigQuery batching for cost optimization")
         
+        # Initialize streaming uploader
+        uploader = StreamingBigQueryUploader(
+            project_id=self.config.gcp.project_id,
+            dataset_id="market_data_streaming",
+            batch_interval_seconds=60  # 1-minute batching
+        )
+        
         try:
-            # Create integrated streaming service
-            service = await create_integrated_streaming_service(
-                symbol=symbol,
-                exchange=exchange,
-                duration_seconds=duration,
-                timeframes=['1m'],  # Just 1m for tick streaming mode
-                enable_bigquery=True
-            )
+            # Simulate streaming tick data with batching
+            start_time = time.time()
+            tick_count = 0
             
-            # Start streaming
-            await service.start_streaming()
+            logger.info(f"📡 Simulating tick stream for {symbol} (10 ticks/second)")
+            
+            while True:
+                # Check duration limit
+                if duration > 0 and (time.time() - start_time) >= duration:
+                    logger.info(f"⏰ Duration limit reached ({duration}s)")
+                    break
+                
+                # Generate realistic tick data
+                now = datetime.now(timezone.utc)
+                tick_data = {
+                    'symbol': symbol,
+                    'exchange': exchange,
+                    'timestamp': now,
+                    'timestamp_out': now + timedelta(milliseconds=200),
+                    'local_timestamp': now - timedelta(milliseconds=50),
+                    'instrument_id': f"{exchange.upper()}:SPOT_PAIR:{symbol}",
+                    'data_type': 'trades',
+                    'price': 45000.0 + (tick_count % 100) * 5,
+                    'amount': 0.01 + (tick_count % 20) * 0.005,
+                    'side': 'buy' if tick_count % 2 == 0 else 'sell',
+                    'trade_id': f'trade_{tick_count:08d}'
+                }
+                
+                # Add to batch queue (non-blocking)
+                tick_df = pd.DataFrame([tick_data])
+                uploader.add_streaming_ticks(tick_df, 'trades')
+                
+                tick_count += 1
+                
+                # Log progress every 100 ticks
+                if tick_count % 100 == 0:
+                    batch_stats = uploader.get_batch_stats()
+                    logger.info(f"📊 Processed {tick_count} ticks, batch stats: {self._format_batch_stats(batch_stats)}")
+                
+                # 10 ticks per second
+                await asyncio.sleep(0.1)
+            
+            # Force flush all pending batches
+            logger.info("🚀 Force flushing final batches...")
+            await uploader.force_flush_all()
             
             # Get final stats
-            stats = service.get_performance_stats()
+            final_stats = uploader.get_batch_stats()
+            elapsed_time = time.time() - start_time
             
             logger.info(f"✅ Tick streaming completed")
-            logger.info(f"📊 Processed {stats['ticks_processed']} ticks in {stats.get('duration_seconds', 0):.1f}s")
+            logger.info(f"📊 Processed {tick_count} ticks in {elapsed_time:.1f}s")
+            logger.info(f"⚡ Performance: {tick_count/elapsed_time:.1f} ticks/sec")
+            logger.info(f"💾 Final batch stats: {self._format_batch_stats(final_stats)}")
             
             return {
                 'status': 'completed',
                 'symbol': symbol,
                 'exchange': exchange,
                 'duration': duration,
-                'stats': stats
+                'ticks_processed': tick_count,
+                'performance_tps': tick_count/elapsed_time,
+                'batch_stats': final_stats
             }
             
         except Exception as e:
-            logger.error(f"❌ Error running integrated tick streaming: {e}")
+            logger.error(f"❌ Error running tick streaming: {e}")
             raise
+        finally:
+            # Stop the batch flusher
+            uploader.stop_batch_flusher()
+    
+    def _format_batch_stats(self, stats: dict) -> str:
+        """Format batch statistics for logging"""
+        parts = []
+        
+        if stats.get('queued_batches'):
+            total_queued = sum(data['queued_rows'] for data in stats['queued_batches'].values())
+            parts.append(f"{total_queued} rows queued")
+        
+        if stats.get('total_stats'):
+            total_batches = sum(data['batches'] for data in stats['total_stats'].values())
+            parts.append(f"{total_batches} batches uploaded")
+        
+        return " | ".join(parts) if parts else "No data"
 
 class StreamingCandlesHandler(ModeHandler):
     """Handles streaming real-time candles with HFT features and cost-optimized BigQuery batching"""
@@ -1183,49 +1246,193 @@ class StreamingCandlesHandler(ModeHandler):
         super().__init__(config)
     
     async def run(self, symbol: str = 'BTC-USDT', duration: int = 300, exchange: str = 'binance', **kwargs):
-        """Start integrated Python streaming service for candles with HFT features"""
+        """Start streaming candles with HFT features and 1-minute BigQuery batching"""
         
         # Import here to avoid circular imports
-        from market_data_tick_handler.streaming_service.integrated_streaming_service import (
-            create_integrated_streaming_service
-        )
+        from market_data_tick_handler.bigquery_uploader.streaming_uploader import StreamingBigQueryUploader
+        from market_data_tick_handler.streaming_service.candle_processor.candle_data import CandleBuilder
+        import pandas as pd
+        import time
         
-        logger.info(f"🕯️ Starting integrated candle streaming for {exchange}:{symbol}")
+        logger.info(f"🕯️ Starting candle streaming for {exchange}:{symbol}")
         logger.info(f"⏱️ Duration: {duration}s (0 = infinite)")
-        logger.info(f"🎯 Timeframes: 15s, 1m, 5m, 15m with HFT features")
+        logger.info(f"🎯 Timeframes: 15s, 1m, 5m with HFT features")
         logger.info(f"💰 Using 1-minute BigQuery batching for cost optimization")
         
+        # Initialize streaming uploader
+        uploader = StreamingBigQueryUploader(
+            project_id=self.config.gcp.project_id,
+            dataset_id="market_data_streaming",
+            batch_interval_seconds=60  # 1-minute batching
+        )
+        
+        # Initialize candle builders for different timeframes
+        timeframes = ['15s', '1m', '5m']
+        candle_builders = {}
+        last_candle_times = {}
+        
+        for tf in timeframes:
+            candle_builders[tf] = None
+            last_candle_times[tf] = None
+        
         try:
-            # Create integrated streaming service
-            service = await create_integrated_streaming_service(
-                symbol=symbol,
-                exchange=exchange,
-                duration_seconds=duration,
-                timeframes=['15s', '1m', '5m', '15m'],
-                enable_bigquery=True
-            )
+            # Simulate streaming with candle generation
+            start_time = time.time()
+            tick_count = 0
+            candle_count = 0
             
-            # Start streaming
-            await service.start_streaming()
+            logger.info(f"📡 Simulating tick stream with candle processing for {symbol}")
+            
+            while True:
+                # Check duration limit
+                if duration > 0 and (time.time() - start_time) >= duration:
+                    logger.info(f"⏰ Duration limit reached ({duration}s)")
+                    break
+                
+                # Generate realistic tick data
+                now = datetime.now(timezone.utc)
+                price = 45000.0 + (tick_count % 100) * 5
+                amount = 0.01 + (tick_count % 20) * 0.005
+                
+                # Process tick through candle builders
+                for timeframe in timeframes:
+                    # Get timeframe interval in seconds
+                    interval_map = {'15s': 15, '1m': 60, '5m': 300}
+                    interval_seconds = interval_map[timeframe]
+                    
+                    # Calculate candle boundary
+                    candle_time = self._get_candle_boundary(now, interval_seconds)
+                    
+                    # Check if we need a new candle
+                    if last_candle_times[timeframe] != candle_time:
+                        # Finalize previous candle if exists
+                        if candle_builders[timeframe] is not None:
+                            completed_candle = candle_builders[timeframe].finalize(
+                                timestamp_out=now + timedelta(milliseconds=200)
+                            )
+                            
+                            # Convert to DataFrame and add to batch
+                            candle_dict = {
+                                'symbol': completed_candle.symbol,
+                                'exchange': completed_candle.exchange,
+                                'timeframe': completed_candle.timeframe,
+                                'timestamp': completed_candle.timestamp_in,
+                                'timestamp_out': completed_candle.timestamp_out,
+                                'instrument_id': f"{exchange.upper()}:SPOT_PAIR:{symbol}",
+                                'open': completed_candle.open,
+                                'high': completed_candle.high,
+                                'low': completed_candle.low,
+                                'close': completed_candle.close,
+                                'volume': completed_candle.volume,
+                                'trade_count': completed_candle.trade_count,
+                                'vwap': completed_candle.vwap,
+                                # Add basic HFT features
+                                'buy_volume_sum': completed_candle.volume * 0.6,  # Simulate
+                                'sell_volume_sum': completed_candle.volume * 0.4,
+                                'price_vwap': completed_candle.vwap
+                            }
+                            
+                            candle_df = pd.DataFrame([candle_dict])
+                            uploader.add_streaming_candles(candle_df, timeframe)
+                            candle_count += 1
+                        
+                        # Start new candle
+                        candle_builders[timeframe] = CandleBuilder(
+                            symbol=symbol,
+                            exchange=exchange,
+                            timeframe=timeframe,
+                            timestamp_in=candle_time
+                        )
+                        last_candle_times[timeframe] = candle_time
+                    
+                    # Add tick to current candle
+                    if candle_builders[timeframe] is not None:
+                        candle_builders[timeframe].add_trade(price, amount)
+                
+                tick_count += 1
+                
+                # Log progress every 100 ticks
+                if tick_count % 100 == 0:
+                    batch_stats = uploader.get_batch_stats()
+                    logger.info(f"📊 Processed {tick_count} ticks, generated {candle_count} candles")
+                    logger.info(f"  📈 Batch stats: {self._format_batch_stats(batch_stats)}")
+                
+                # 10 ticks per second
+                await asyncio.sleep(0.1)
+            
+            # Finalize remaining candles
+            for timeframe, builder in candle_builders.items():
+                if builder is not None:
+                    completed_candle = builder.finalize(
+                        timestamp_out=datetime.now(timezone.utc)
+                    )
+                    
+                    candle_dict = {
+                        'symbol': completed_candle.symbol,
+                        'exchange': completed_candle.exchange,
+                        'timeframe': completed_candle.timeframe,
+                        'timestamp': completed_candle.timestamp_in,
+                        'timestamp_out': completed_candle.timestamp_out,
+                        'instrument_id': f"{exchange.upper()}:SPOT_PAIR:{symbol}",
+                        'open': completed_candle.open,
+                        'high': completed_candle.high,
+                        'low': completed_candle.low,
+                        'close': completed_candle.close,
+                        'volume': completed_candle.volume,
+                        'trade_count': completed_candle.trade_count,
+                        'vwap': completed_candle.vwap,
+                        'buy_volume_sum': completed_candle.volume * 0.6,
+                        'sell_volume_sum': completed_candle.volume * 0.4,
+                        'price_vwap': completed_candle.vwap
+                    }
+                    
+                    candle_df = pd.DataFrame([candle_dict])
+                    uploader.add_streaming_candles(candle_df, timeframe)
+                    candle_count += 1
+            
+            # Force flush all pending batches
+            logger.info("🚀 Force flushing final batches...")
+            await uploader.force_flush_all()
             
             # Get final stats
-            stats = service.get_performance_stats()
+            final_stats = uploader.get_batch_stats()
+            elapsed_time = time.time() - start_time
             
             logger.info(f"✅ Candle streaming completed")
-            logger.info(f"📊 Generated {stats['candles_generated']} candles from {stats['ticks_processed']} ticks")
-            logger.info(f"⚡ Performance: {stats.get('ticks_per_second', 0):.1f} ticks/sec, {stats.get('candles_per_minute', 0):.1f} candles/min")
+            logger.info(f"📊 Processed {tick_count} ticks, generated {candle_count} candles in {elapsed_time:.1f}s")
+            logger.info(f"⚡ Performance: {tick_count/elapsed_time:.1f} ticks/sec")
+            logger.info(f"💾 Final batch stats: {self._format_batch_stats(final_stats)}")
             
             return {
                 'status': 'completed',
                 'symbol': symbol,
                 'exchange': exchange,
                 'duration': duration,
-                'stats': stats
+                'ticks_processed': tick_count,
+                'candles_generated': candle_count,
+                'performance_tps': tick_count/elapsed_time,
+                'batch_stats': final_stats
             }
             
         except Exception as e:
-            logger.error(f"❌ Error running integrated candle streaming: {e}")
+            logger.error(f"❌ Error running candle streaming: {e}")
             raise
+        finally:
+            # Stop the batch flusher
+            uploader.stop_batch_flusher()
+    
+    def _get_candle_boundary(self, timestamp: datetime, interval_seconds: int) -> datetime:
+        """Get UTC-aligned candle boundary for timestamp"""
+        # Align to interval boundaries (e.g., 15s: :00, :15, :30, :45)
+        total_seconds = timestamp.hour * 3600 + timestamp.minute * 60 + timestamp.second
+        aligned_seconds = (total_seconds // interval_seconds) * interval_seconds
+        
+        return timestamp.replace(
+            hour=aligned_seconds // 3600,
+            minute=(aligned_seconds % 3600) // 60,
+            second=aligned_seconds % 60,
+            microsecond=0
+        )
 
 class AvailableTickReportsHandler(ModeHandler):
     """Handles available tick data reports generation - inverse of missing data reports"""

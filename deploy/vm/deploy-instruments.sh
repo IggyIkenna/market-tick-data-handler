@@ -109,10 +109,18 @@ deploy_vm() {
     echo -e "${YELLOW}📝 Creating startup script...${NC}"
     cat > /tmp/instrument-startup.sh << 'EOF'
 #!/bin/bash
+set -e
+
+echo "Starting VM setup..."
 
 # Update system
 apt-get update
-apt-get install -y docker.io docker-compose git python3 python3-pip
+apt-get install -y docker.io git python3 python3-pip
+
+# Install Google Cloud SDK
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add -
+apt-get update && apt-get install -y google-cloud-cli
 
 # Start Docker service
 systemctl start docker
@@ -125,14 +133,17 @@ usermod -aG docker $USER
 mkdir -p /opt/market-tick-data-handler
 cd /opt/market-tick-data-handler
 
-# Clone repository (in production, use proper authentication)
-# git clone <your-repo-url> .
+# Clone repository
+echo "Cloning repository..."
+git clone https://github.com/IggyIkenna/market-tick-data-handler.git .
 
-# For now, we'll assume the code is already there
-# In production, you'd want to:
-# 1. Use Cloud Build to build and push Docker images
-# 2. Pull the image from Container Registry
-# 3. Run the container
+# Install Python dependencies
+echo "Installing Python dependencies..."
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
+
+# Configure Docker for GCR
+gcloud auth configure-docker asia-northeast1-docker.pkg.dev
 
 # Set up environment
 cat > .env << 'ENVEOF'
@@ -417,10 +428,8 @@ run_instruments() {
         VM_STATUS=$(get_vm_status)
         
         if [ "$VM_STATUS" = "RUNNING" ]; then
-            # Build Docker command
-            cmd="docker run --rm -v /var/log/market-data:/app/logs"
-            cmd="$cmd asia-northeast1-docker.pkg.dev/central-element-323112/market-data-tick-handler/market-tick-instrument-generator:latest"
-            cmd="$cmd python -m market_data_tick_handler.main --mode instruments --start-date $start_date --end-date $end_date"
+            # Build command to run Python package directly
+            cmd="cd /opt/market-tick-data-handler && python3 -m market_data_tick_handler.main --mode instruments --start-date $start_date --end-date $end_date"
             if [ -n "$venues" ]; then
                 cmd="$cmd --venues $venues"
             fi

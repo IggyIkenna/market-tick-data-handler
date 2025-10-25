@@ -58,12 +58,24 @@ class StreamingBigQueryUploader:
                         # Check candle batches
                         for timeframe in list(self.candle_batches.keys()):
                             if (current_time - self.last_flush_time[f"candles_{timeframe}"]).total_seconds() >= self.batch_interval_seconds:
-                                asyncio.create_task(self._flush_candle_batch(timeframe))
+                                # Schedule flush in a thread-safe way
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    loop.create_task(self._flush_candle_batch(timeframe))
+                                except RuntimeError:
+                                    # No running loop, skip this flush
+                                    pass
                         
                         # Check tick batches
                         for data_type in list(self.tick_batches.keys()):
                             if (current_time - self.last_flush_time[f"ticks_{data_type}"]).total_seconds() >= self.batch_interval_seconds:
-                                asyncio.create_task(self._flush_tick_batch(data_type))
+                                # Schedule flush in a thread-safe way
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    loop.create_task(self._flush_tick_batch(data_type))
+                                except RuntimeError:
+                                    # No running loop, skip this flush
+                                    pass
                                 
                 except Exception as e:
                     logger.error(f"Error in batch flusher: {e}")

@@ -39,30 +39,39 @@ __author__ = "Market Data Team"
 __email__ = "market-data@yourcompany.com"
 __description__ = "Comprehensive market data tick handler for cryptocurrency trading data"
 
-# Core imports for easy access
+# Core imports for easy access (safe imports that don't trigger config loading)
 from .data_client.data_client import DataClient
 from .data_client.candle_data_reader import CandleDataReader
 from .data_client.tick_data_reader import TickDataReader
-from .data_client.hft_features_reader import HFTFeaturesReader
-from .data_client.mft_features_reader import MFTFeaturesReader
 
-from .candle_processor.historical_candle_processor import HistoricalCandleProcessor
-from .candle_processor.aggregated_candle_processor import AggregatedCandleProcessor
-from .candle_processor.hft_feature_processor import HFTFeatureProcessor
+# Streaming components
+from .streaming_service import CandleBuilder, CandleData, MultiTimeframeProcessor, UTCTimestampManager
 
-from .bigquery_uploader.candle_uploader import CandleUploader
-from .bigquery_uploader.upload_orchestrator import UploadOrchestrator
+# BigQuery components (safe to import)
+from .bigquery_uploader.streaming_uploader import StreamingBigQueryUploader
 
-from .data_downloader.download_orchestrator import DownloadOrchestrator
-from .data_downloader.tardis_connector import TardisConnector
+# Lazy import functions for components that require config
+def get_historical_candle_processor():
+    """Get HistoricalCandleProcessor with lazy import"""
+    from .candle_processor.historical_candle_processor import HistoricalCandleProcessor
+    return HistoricalCandleProcessor
 
-from .instrument_processor.canonical_key_generator import CanonicalInstrumentKeyGenerator
-from .instrument_processor.gcs_uploader import InstrumentGCSUploader
+def get_download_orchestrator():
+    """Get DownloadOrchestrator with lazy import"""
+    from .data_downloader.download_orchestrator import DownloadOrchestrator
+    return DownloadOrchestrator
 
-from .data_validator.data_validator import DataValidator
+def get_candle_uploader():
+    """Get CandleUploader with lazy import"""
+    from .bigquery_uploader.candle_uploader import CandleUploader
+    return CandleUploader
 
-from .utils.logger import setup_structured_logging
-from .utils.error_handler import ErrorHandler
+# Additional lazy imports for components that may require config
+def get_data_validator():
+    """Get DataValidator with lazy import"""
+    from .data_validator.data_validator import DataValidator
+    return DataValidator
+# Utils (safe to import)
 from .utils.performance_monitor import performance_monitor
 
 __all__ = [

@@ -311,32 +311,52 @@ class ConfigManager:
         # Try to get Tardis API key from Secret Manager first (default behavior)
         tardis_api_key = None
         use_secret_manager = os.getenv('USE_SECRET_MANAGER', 'true').lower() == 'true'
+        secret_name = os.getenv('TARDIS_SECRET_NAME', 'tardis-api-key')
         
         if use_secret_manager and SECRET_MANAGER_AVAILABLE:
             try:
-                secret_name = os.getenv('TARDIS_SECRET_NAME', 'tardis-api-key')
+                logging.info(f"Attempting to retrieve Tardis API key from Secret Manager (secret: {secret_name}, project: {gcp_project_id})")
                 tardis_api_key = get_tardis_api_key(
                     project_id=gcp_project_id,
                     credentials_path=gcp_credentials_path,
                     secret_name=secret_name
                 )
                 if tardis_api_key:
-                    logging.info("Retrieved Tardis API key from Secret Manager")
+                    logging.info("Successfully retrieved Tardis API key from Secret Manager")
+                else:
+                    logging.warning(f"Secret Manager returned None for secret '{secret_name}' - this might indicate authentication issues or the secret doesn't exist")
             except Exception as e:
                 logging.warning(f"Failed to retrieve API key from Secret Manager: {e}")
+                logging.warning("Falling back to environment variable")
+        elif use_secret_manager and not SECRET_MANAGER_AVAILABLE:
+            logging.warning("Secret Manager requested but utilities not available - falling back to environment variables")
         
         # Fallback to environment variable
         if not tardis_api_key:
             tardis_api_key = os.getenv('TARDIS_API_KEY')
             if tardis_api_key:
                 logging.info("Retrieved Tardis API key from environment variable")
+            else:
+                logging.warning("TARDIS_API_KEY environment variable not set or empty")
         
         if not tardis_api_key:
-            error_msg = "Tardis API key not found. "
+            error_details = []
             if use_secret_manager:
-                error_msg += f"Check Secret Manager secret '{os.getenv('TARDIS_SECRET_NAME', 'tardis-api-key')}' or set TARDIS_API_KEY environment variable."
-            else:
-                error_msg += "Set TARDIS_API_KEY environment variable or enable Secret Manager with USE_SECRET_MANAGER=true."
+                if SECRET_MANAGER_AVAILABLE:
+                    error_details.append(f"Secret Manager lookup failed for secret '{secret_name}' in project '{gcp_project_id}'")
+                    if gcp_credentials_path:
+                        error_details.append(f"Using credentials: {gcp_credentials_path}")
+                    else:
+                        error_details.append("No explicit credentials path provided (using default)")
+                else:
+                    error_details.append("Secret Manager utilities not available")
+            error_details.append("Environment variable TARDIS_API_KEY not set")
+            
+            error_msg = "Tardis API key not found. " + "; ".join(error_details) + ". "
+            error_msg += f"Possible solutions: "
+            error_msg += f"1) Restore credentials file: 'bash scripts/restore-credentials.sh', "
+            error_msg += f"2) Ensure secret '{secret_name}' exists in Secret Manager with proper access, "
+            error_msg += f"3) Set TARDIS_API_KEY environment variable."
             raise ValueError(error_msg)
         
         config['tardis'] = {
