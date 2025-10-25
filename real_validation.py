@@ -29,12 +29,12 @@ import logging
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 # Set up environment variables for real services
-os.environ['TARDIS_API_KEY'] = 'TD.your_tardis_api_key'
-os.environ['GCP_PROJECT_ID'] = 'central-element-323112'
-os.environ['GCS_BUCKET'] = 'your-gcs-bucket'
 os.environ['GCP_CREDENTIALS_PATH'] = '/workspace/central-element-323112-e35fb0ddafe2.json'
-os.environ['USE_SECRET_MANAGER'] = 'false'
 
 # Configure logging
 logging.basicConfig(
@@ -703,17 +703,21 @@ async def main():
     print("=" * 50)
     
     # Check environment
-    required_vars = ['TARDIS_API_KEY', 'GCP_PROJECT_ID', 'GCS_BUCKET', 'GCP_CREDENTIALS_PATH']
-    missing_vars = [var for var in required_vars if not os.getenv(var) or 'your_' in os.getenv(var, '')]
+    required_vars = ['GCP_PROJECT_ID', 'GCS_BUCKET', 'GCP_CREDENTIALS_PATH']
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    
+    # Check if Tardis API key is available (either from env or secret manager)
+    if not os.getenv('TARDIS_API_KEY') and not os.getenv('USE_SECRET_MANAGER'):
+        missing_vars.append('TARDIS_API_KEY (or USE_SECRET_MANAGER=true)')
     
     if missing_vars:
         print(f"❌ Missing environment variables: {missing_vars}")
-        print("   Please set your actual API keys and configuration")
-        print("\nRequired environment variables:")
-        print("   export TARDIS_API_KEY='TD.your_actual_tardis_key'")
-        print("   export GCS_BUCKET='your_actual_bucket_name'")
-        print("   export BINANCE_API_KEY='your_actual_binance_key'")
-        print("   export BINANCE_SECRET_KEY='your_actual_binance_secret'")
+        print("   Please check your .env file configuration")
+        print("\nRequired environment variables in .env:")
+        print("   GCP_PROJECT_ID=central-element-323112")
+        print("   GCS_BUCKET=market-data-tick")
+        print("   USE_SECRET_MANAGER=true")
+        print("   TARDIS_SECRET_NAME=tardis-api-key")
         return 1
     
     if args.dry_run:

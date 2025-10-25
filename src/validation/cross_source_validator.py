@@ -317,55 +317,55 @@ class CrossSourceValidator:
         end_date: datetime,
         max_candles: int
     ) -> List[OHLCV]:
-        """Get candles from Binance via CCXT"""
+        """Get candles from Binance using public API (no authentication required)"""
         try:
-            # Convert symbol format (e.g., 'BTC-USDT' for Binance)
-            binance_symbol = symbol.replace(':', '/').split('/')[-1] if ':' in symbol else symbol
+            import requests
             
-            # Convert timeframe to CCXT format
-            timeframe_map = {
-                '15s': '15s',
-                '1m': '1m',
-                '5m': '5m',
-                '15m': '15m',
-                '1h': '1h',
-                '4h': '4h',
-                '1d': '1d'
-            }
-            ccxt_timeframe = timeframe_map.get(timeframe, timeframe)
+            # Convert symbol format (BTC-USDT -> BTCUSDT)
+            binance_symbol = symbol.replace('-', '')
+            
+            # Convert timeframe to Binance format
+            binance_timeframe = timeframe
             
             # Calculate limit based on timeframe and date range
-            days_diff = (end_date - start_date).days
-            if timeframe == '15s':
-                limit = min(days_diff * 24 * 4 * 60, max_candles)  # 4 candles per minute
-            elif timeframe == '1m':
-                limit = min(days_diff * 24 * 60, max_candles)
-            elif timeframe == '5m':
-                limit = min(days_diff * 24 * 12, max_candles)
-            elif timeframe == '1h':
-                limit = min(days_diff * 24, max_candles)
-            else:
-                limit = max_candles
+            interval_seconds = self._get_interval_seconds(timeframe)
+            total_seconds = (end_date - start_date).total_seconds()
+            max_possible_candles = int(total_seconds / interval_seconds)
+            limit = min(max_candles, max_possible_candles, 1000)  # Binance max is 1000
             
-            # Fetch OHLCV data
-            ohlcv_data = self.binance_exchange.fetch_ohlcv(
-                binance_symbol, 
-                ccxt_timeframe, 
-                since=int(start_date.timestamp() * 1000),
-                limit=limit
-            )
+            # Binance public API endpoint
+            url = "https://api.binance.com/api/v3/klines"
+            
+            # Calculate start and end times in milliseconds
+            start_time_ms = int(start_date.timestamp() * 1000)
+            end_time_ms = int(end_date.timestamp() * 1000)
+            
+            params = {
+                'symbol': binance_symbol,
+                'interval': binance_timeframe,
+                'startTime': start_time_ms,
+                'endTime': end_time_ms,
+                'limit': limit
+            }
+            
+            # Make request to Binance public API
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            klines_data = response.json()
             
             candles = []
-            for ohlcv in ohlcv_data:
-                timestamp = datetime.fromtimestamp(ohlcv[0] / 1000, tz=timezone.utc)
+            for kline in klines_data:
+                # Binance klines format: [open_time, open, high, low, close, volume, close_time, ...]
+                timestamp = datetime.fromtimestamp(kline[0] / 1000, tz=timezone.utc)
                 if start_date <= timestamp <= end_date:
                     candles.append(OHLCV(
                         timestamp=timestamp,
-                        open=ohlcv[1],
-                        high=ohlcv[2],
-                        low=ohlcv[3],
-                        close=ohlcv[4],
-                        volume=ohlcv[5],
+                        open=float(kline[1]),
+                        high=float(kline[2]),
+                        low=float(kline[3]),
+                        close=float(kline[4]),
+                        volume=float(kline[5]),
                         symbol=symbol,
                         timeframe=timeframe,
                         source='binance'
@@ -421,6 +421,18 @@ class CrossSourceValidator:
         except Exception as e:
             logger.error(f"Failed to get Tardis candles: {e}")
             return []
+    
+    def _get_interval_seconds(self, timeframe: str) -> int:
+        """Get interval in seconds for timeframe"""
+        intervals = {
+            '1m': 60,
+            '5m': 300,
+            '15m': 900,
+            '1h': 3600,
+            '4h': 14400,
+            '1d': 86400
+        }
+        return intervals.get(timeframe, 60)
     
     def _convert_to_tardis_symbol(self, symbol: str) -> str:
         """Convert Binance symbol to Tardis instrument format"""

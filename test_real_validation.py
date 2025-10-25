@@ -14,12 +14,12 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Set up environment variables
-os.environ['TARDIS_API_KEY'] = 'TD.your_tardis_api_key'
-os.environ['GCP_PROJECT_ID'] = 'central-element-323112'
-os.environ['GCS_BUCKET'] = 'your-gcs-bucket'
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
+# Set up environment variables for real services
 os.environ['GCP_CREDENTIALS_PATH'] = '/workspace/central-element-323112-e35fb0ddafe2.json'
-os.environ['USE_SECRET_MANAGER'] = 'false'
 
 import logging
 
@@ -37,7 +37,6 @@ async def test_environment_setup():
     
     # Check environment variables
     required_vars = [
-        'TARDIS_API_KEY',
         'GCP_PROJECT_ID', 
         'GCS_BUCKET',
         'GCP_CREDENTIALS_PATH'
@@ -45,8 +44,12 @@ async def test_environment_setup():
     
     missing_vars = []
     for var in required_vars:
-        if not os.getenv(var) or 'your_' in os.getenv(var, ''):
+        if not os.getenv(var):
             missing_vars.append(var)
+    
+    # Check if Tardis API key is available (either from env or secret manager)
+    if not os.getenv('TARDIS_API_KEY') and not os.getenv('USE_SECRET_MANAGER'):
+        missing_vars.append('TARDIS_API_KEY (or USE_SECRET_MANAGER=true)')
     
     if missing_vars:
         print(f"❌ Missing environment variables: {missing_vars}")
