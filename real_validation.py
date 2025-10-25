@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """
-Three Rules Validation System
+Real Validation Framework
 
-Implements the comprehensive validation system from market-data-handler:
-1. Timestamp Alignment Rule
-2. OHLC Preservation Rule  
-3. Volume Consistency Rule
+Implements the Three Rules Validation System using actual Tardis API, 
+Google Cloud Storage, and Binance data as specified in the documentation.
 
-This validates Binance CCXT data against Tardis-derived data across all timeframes.
+Three Rules:
+1. Timestamp Alignment Rule - Ensures timestamps align between sources
+2. OHLC Preservation Rule - Validates OHLC values are preserved correctly  
+3. Volume Consistency Rule - Checks volume consistency between sources
+
+Usage:
+    python3 real_validation.py                           # Run with current env vars
+    python3 real_validation.py --symbol ETH-USDT        # Test specific symbol
+    python3 real_validation.py --timeframes 1m,5m,1h    # Test specific timeframes
+    python3 real_validation.py --hours 6                # Test last 6 hours
 """
 
 import sys
 import os
 import asyncio
+import argparse
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -21,20 +29,12 @@ import logging
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Set up environment variables
+# Set up environment variables for real services
 os.environ['TARDIS_API_KEY'] = 'TD.your_tardis_api_key'
 os.environ['GCP_PROJECT_ID'] = 'central-element-323112'
 os.environ['GCS_BUCKET'] = 'your-gcs-bucket'
 os.environ['GCP_CREDENTIALS_PATH'] = '/workspace/central-element-323112-e35fb0ddafe2.json'
 os.environ['USE_SECRET_MANAGER'] = 'false'
-
-import pandas as pd
-import numpy as np
-from src.validation.cross_source_validator import CrossSourceValidator
-from src.validation.validation_results import ValidationStatus, ValidationResult, ValidationReport
-from src.data_downloader.data_client import DataClient
-from src.data_downloader.tardis_connector import TardisConnector
-from config import get_config
 
 # Configure logging
 logging.basicConfig(
@@ -44,22 +44,46 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class ThreeRulesValidator:
+class RealThreeRulesValidator:
     """
-    Implements the Three Rules Validation System for cross-source data validation.
+    Real Three Rules Validation System
     
+    Validates Binance CCXT data against Tardis-derived data using actual services.
     Based on the market-data-handler repository validation framework.
     """
     
-    def __init__(self, data_client: DataClient, tardis_connector: TardisConnector):
-        self.data_client = data_client
-        self.tardis_connector = tardis_connector
-        self.cross_source_validator = CrossSourceValidator(data_client, tardis_connector)
+    def __init__(self):
+        self.data_client = None
+        self.tardis_connector = None
+        self.cross_source_validator = None
         
         # Validation tolerances
         self.timestamp_tolerance_seconds = 1.0
         self.price_tolerance_percent = 0.01  # 0.01%
         self.volume_tolerance_percent = 0.05  # 0.05%
+    
+    async def initialize(self):
+        """Initialize real services"""
+        try:
+            from src.data_downloader.data_client import DataClient
+            from src.data_downloader.tardis_connector import TardisConnector
+            from src.validation.cross_source_validator import CrossSourceValidator
+            from config import get_config
+            
+            # Load configuration
+            config = get_config()
+            
+            # Initialize services
+            self.data_client = DataClient(config.gcp.bucket, config)
+            self.tardis_connector = TardisConnector()
+            self.cross_source_validator = CrossSourceValidator(self.data_client, self.tardis_connector)
+            
+            logger.info("✅ Real services initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize services: {e}")
+            return False
     
     async def validate_three_rules(
         self,
@@ -68,9 +92,9 @@ class ThreeRulesValidator:
         start_date: datetime,
         end_date: datetime,
         max_candles_per_timeframe: int = 1000
-    ) -> ValidationReport:
+    ) -> Dict[str, Any]:
         """
-        Validate the three rules across multiple timeframes.
+        Validate the three rules across multiple timeframes using real data.
         
         Args:
             symbol: Trading symbol (e.g., 'BTC-USDT')
@@ -80,18 +104,29 @@ class ThreeRulesValidator:
             max_candles_per_timeframe: Maximum candles to fetch per timeframe
             
         Returns:
-            ValidationReport with results for all timeframes and rules
+            Dictionary with validation results
         """
         
         logger.info(f"🔍 Starting Three Rules Validation for {symbol}")
         logger.info(f"   Timeframes: {timeframes}")
         logger.info(f"   Date Range: {start_date} to {end_date}")
         
-        report = ValidationReport(
-            report_id=f"three_rules_validation_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            start_time=datetime.now(timezone.utc),
-            end_time=datetime.now(timezone.utc)
-        )
+        results = {
+            'symbol': symbol,
+            'timeframes': timeframes,
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'timestamp_rule': {},
+            'ohlc_rule': {},
+            'volume_rule': {},
+            'aggregation_rule': {},
+            'summary': {
+                'total_tests': 0,
+                'passed': 0,
+                'failed': 0,
+                'warnings': 0
+            }
+        }
         
         # Validate each timeframe
         for timeframe in timeframes:
@@ -117,44 +152,76 @@ class ThreeRulesValidator:
                 
                 if not binance_candles:
                     logger.warning(f"⚠️ No Binance data for {symbol} {timeframe}")
-                    report.add_result(ValidationResult(
-                        test_name=f"binance_data_availability_{timeframe}",
-                        status=ValidationStatus.FAIL,
-                        message=f"No Binance data available for {timeframe}",
-                        details={"timeframe": timeframe, "candles_count": 0}
-                    ))
+                    results['timestamp_rule'][timeframe] = {
+                        'status': 'FAIL',
+                        'message': f'No Binance data available for {timeframe}',
+                        'binance_candles': 0,
+                        'tardis_candles': len(tardis_candles) if tardis_candles else 0
+                    }
+                    results['summary']['total_tests'] += 1
+                    results['summary']['failed'] += 1
                     continue
-                
-                if not tardis_candles:
-                    logger.warning(f"⚠️ No Tardis data for {symbol} {timeframe}")
-                    report.add_result(ValidationResult(
-                        test_name=f"tardis_data_availability_{timeframe}",
-                        status=ValidationStatus.WARNING,
-                        message=f"No Tardis data available for {timeframe}",
-                        details={"timeframe": timeframe, "candles_count": 0}
-                    ))
-                    # Continue with Binance-only validation
-                    tardis_candles = []
                 
                 # Rule 1: Timestamp Alignment
                 timestamp_result = await self._validate_timestamp_alignment(
                     binance_candles, tardis_candles, timeframe
                 )
-                report.add_result(timestamp_result)
+                results['timestamp_rule'][timeframe] = timestamp_result
+                results['summary']['total_tests'] += 1
+                if timestamp_result['status'] == 'PASS':
+                    results['summary']['passed'] += 1
+                elif timestamp_result['status'] == 'WARNING':
+                    results['summary']['warnings'] += 1
+                else:
+                    results['summary']['failed'] += 1
                 
                 # Rule 2: OHLC Preservation (only if we have both sources)
                 if tardis_candles:
                     ohlc_result = await self._validate_ohlc_preservation(
                         binance_candles, tardis_candles, timeframe
                     )
-                    report.add_result(ohlc_result)
+                    results['ohlc_rule'][timeframe] = ohlc_result
+                    results['summary']['total_tests'] += 1
+                    if ohlc_result['status'] == 'PASS':
+                        results['summary']['passed'] += 1
+                    elif ohlc_result['status'] == 'WARNING':
+                        results['summary']['warnings'] += 1
+                    else:
+                        results['summary']['failed'] += 1
+                else:
+                    logger.warning(f"⚠️ No Tardis data for {symbol} {timeframe} - skipping OHLC validation")
+                    results['ohlc_rule'][timeframe] = {
+                        'status': 'WARNING',
+                        'message': f'No Tardis data available for {timeframe}',
+                        'binance_candles': len(binance_candles),
+                        'tardis_candles': 0
+                    }
+                    results['summary']['total_tests'] += 1
+                    results['summary']['warnings'] += 1
                 
                 # Rule 3: Volume Consistency (only if we have both sources)
                 if tardis_candles:
                     volume_result = await self._validate_volume_consistency(
                         binance_candles, tardis_candles, timeframe
                     )
-                    report.add_result(volume_result)
+                    results['volume_rule'][timeframe] = volume_result
+                    results['summary']['total_tests'] += 1
+                    if volume_result['status'] == 'PASS':
+                        results['summary']['passed'] += 1
+                    elif volume_result['status'] == 'WARNING':
+                        results['summary']['warnings'] += 1
+                    else:
+                        results['summary']['failed'] += 1
+                else:
+                    logger.warning(f"⚠️ No Tardis data for {symbol} {timeframe} - skipping volume validation")
+                    results['volume_rule'][timeframe] = {
+                        'status': 'WARNING',
+                        'message': f'No Tardis data available for {timeframe}',
+                        'binance_candles': len(binance_candles),
+                        'tardis_candles': 0
+                    }
+                    results['summary']['total_tests'] += 1
+                    results['summary']['warnings'] += 1
                 
                 # Additional: Aggregation consistency for smaller timeframes
                 if timeframe in ['5m', '15m', '1h', '4h', '1d']:
@@ -163,48 +230,58 @@ class ThreeRulesValidator:
                         agg_result = await self._validate_aggregation_consistency(
                             symbol, base_timeframe, timeframe, start_date, end_date
                         )
-                        report.add_result(agg_result)
+                        results['aggregation_rule'][f"{base_timeframe}_to_{timeframe}"] = agg_result
+                        results['summary']['total_tests'] += 1
+                        if agg_result['status'] == 'PASS':
+                            results['summary']['passed'] += 1
+                        elif agg_result['status'] == 'WARNING':
+                            results['summary']['warnings'] += 1
+                        else:
+                            results['summary']['failed'] += 1
                 
             except Exception as e:
                 logger.error(f"❌ Error validating {timeframe}: {e}")
-                report.add_result(ValidationResult(
-                    test_name=f"validation_error_{timeframe}",
-                    status=ValidationStatus.FAIL,
-                    message=f"Error during validation: {str(e)}",
-                    details={"timeframe": timeframe, "error": str(e)}
-                ))
+                results['timestamp_rule'][timeframe] = {
+                    'status': 'FAIL',
+                    'message': f'Error during validation: {str(e)}',
+                    'error': str(e)
+                }
+                results['summary']['total_tests'] += 1
+                results['summary']['failed'] += 1
         
-        report.end_time = datetime.now(timezone.utc)
+        # Calculate success rate
+        if results['summary']['total_tests'] > 0:
+            results['summary']['success_rate'] = (
+                (results['summary']['passed'] + results['summary']['warnings'] * 0.5) / 
+                results['summary']['total_tests'] * 100
+            )
+        else:
+            results['summary']['success_rate'] = 0.0
         
         # Log summary
         logger.info("📊 Three Rules Validation Summary:")
-        logger.info(f"   Total Tests: {report.total_tests}")
-        logger.info(f"   Passed: {report.passed_tests}")
-        logger.info(f"   Failed: {report.failed_tests}")
-        logger.info(f"   Warnings: {report.warning_tests}")
-        logger.info(f"   Success Rate: {report.get_success_rate():.1f}%")
+        logger.info(f"   Total Tests: {results['summary']['total_tests']}")
+        logger.info(f"   Passed: {results['summary']['passed']}")
+        logger.info(f"   Failed: {results['summary']['failed']}")
+        logger.info(f"   Warnings: {results['summary']['warnings']}")
+        logger.info(f"   Success Rate: {results['summary']['success_rate']:.1f}%")
         
-        return report
+        return results
     
     async def _validate_timestamp_alignment(
         self,
         binance_candles: List,
         tardis_candles: List,
         timeframe: str
-    ) -> ValidationResult:
-        """
-        Rule 1: Timestamp Alignment
-        
-        Validates that timestamps from both sources align within tolerance.
-        """
+    ) -> Dict[str, Any]:
+        """Rule 1: Timestamp Alignment"""
         try:
             if not binance_candles:
-                return ValidationResult(
-                    test_name=f"timestamp_alignment_{timeframe}",
-                    status=ValidationStatus.FAIL,
-                    message="No Binance candles for timestamp validation",
-                    details={"timeframe": timeframe}
-                )
+                return {
+                    'status': 'FAIL',
+                    'message': 'No Binance candles for timestamp validation',
+                    'timeframe': timeframe
+                }
             
             # Extract timestamps
             binance_timestamps = [c.timestamp for c in binance_candles]
@@ -243,63 +320,54 @@ class ThreeRulesValidator:
             
             # Determine result
             if not timestamp_issues and not alignment_issues:
-                status = ValidationStatus.PASS
-                message = f"Timestamp alignment validated for {timeframe}"
+                status = 'PASS'
+                message = f'Timestamp alignment validated for {timeframe}'
             else:
-                status = ValidationStatus.FAIL
-                message = f"Timestamp alignment issues found for {timeframe}"
+                status = 'FAIL'
+                message = f'Timestamp alignment issues found for {timeframe}'
             
-            return ValidationResult(
-                test_name=f"timestamp_alignment_{timeframe}",
-                status=status,
-                message=message,
-                details={
-                    'timeframe': timeframe,
-                    'binance_candles': len(binance_candles),
-                    'tardis_candles': len(tardis_candles) if tardis_candles else 0,
-                    'timestamp_issues': timestamp_issues,
-                    'alignment_issues': alignment_issues
-                }
-            )
+            return {
+                'status': status,
+                'message': message,
+                'timeframe': timeframe,
+                'binance_candles': len(binance_candles),
+                'tardis_candles': len(tardis_candles) if tardis_candles else 0,
+                'timestamp_issues': timestamp_issues,
+                'alignment_issues': alignment_issues
+            }
             
         except Exception as e:
-            return ValidationResult(
-                test_name=f"timestamp_alignment_{timeframe}",
-                status=ValidationStatus.FAIL,
-                message=f"Timestamp alignment validation failed: {str(e)}",
-                details={'timeframe': timeframe, 'error': str(e)}
-            )
+            return {
+                'status': 'FAIL',
+                'message': f'Timestamp alignment validation failed: {str(e)}',
+                'timeframe': timeframe,
+                'error': str(e)
+            }
     
     async def _validate_ohlc_preservation(
         self,
         binance_candles: List,
         tardis_candles: List,
         timeframe: str
-    ) -> ValidationResult:
-        """
-        Rule 2: OHLC Preservation
-        
-        Validates that OHLC values are preserved correctly between sources.
-        """
+    ) -> Dict[str, Any]:
+        """Rule 2: OHLC Preservation"""
         try:
             if not binance_candles or not tardis_candles:
-                return ValidationResult(
-                    test_name=f"ohlc_preservation_{timeframe}",
-                    status=ValidationStatus.WARNING,
-                    message="Insufficient data for OHLC preservation validation",
-                    details={"timeframe": timeframe}
-                )
+                return {
+                    'status': 'WARNING',
+                    'message': 'Insufficient data for OHLC preservation validation',
+                    'timeframe': timeframe
+                }
             
             # Align candles by timestamp
             aligned_candles = self._align_candles_by_timestamp(binance_candles, tardis_candles)
             
             if not aligned_candles:
-                return ValidationResult(
-                    test_name=f"ohlc_preservation_{timeframe}",
-                    status=ValidationStatus.FAIL,
-                    message="No aligned candles for OHLC preservation validation",
-                    details={"timeframe": timeframe}
-                )
+                return {
+                    'status': 'FAIL',
+                    'message': 'No aligned candles for OHLC preservation validation',
+                    'timeframe': timeframe
+                }
             
             # Check OHLC preservation
             ohlc_issues = []
@@ -326,62 +394,53 @@ class ThreeRulesValidator:
             
             # Determine result
             if not ohlc_issues:
-                status = ValidationStatus.PASS
-                message = f"OHLC preservation validated for {timeframe}"
+                status = 'PASS'
+                message = f'OHLC preservation validated for {timeframe}'
             else:
-                status = ValidationStatus.FAIL
-                message = f"OHLC preservation issues found for {timeframe}"
+                status = 'FAIL'
+                message = f'OHLC preservation issues found for {timeframe}'
             
-            return ValidationResult(
-                test_name=f"ohlc_preservation_{timeframe}",
-                status=status,
-                message=message,
-                details={
-                    'timeframe': timeframe,
-                    'aligned_candles': len(aligned_candles),
-                    'ohlc_issues': ohlc_issues,
-                    'tolerance_percent': self.price_tolerance_percent
-                }
-            )
+            return {
+                'status': status,
+                'message': message,
+                'timeframe': timeframe,
+                'aligned_candles': len(aligned_candles),
+                'ohlc_issues': ohlc_issues,
+                'tolerance_percent': self.price_tolerance_percent
+            }
             
         except Exception as e:
-            return ValidationResult(
-                test_name=f"ohlc_preservation_{timeframe}",
-                status=ValidationStatus.FAIL,
-                message=f"OHLC preservation validation failed: {str(e)}",
-                details={'timeframe': timeframe, 'error': str(e)}
-            )
+            return {
+                'status': 'FAIL',
+                'message': f'OHLC preservation validation failed: {str(e)}',
+                'timeframe': timeframe,
+                'error': str(e)
+            }
     
     async def _validate_volume_consistency(
         self,
         binance_candles: List,
         tardis_candles: List,
         timeframe: str
-    ) -> ValidationResult:
-        """
-        Rule 3: Volume Consistency
-        
-        Validates that volume values are consistent between sources.
-        """
+    ) -> Dict[str, Any]:
+        """Rule 3: Volume Consistency"""
         try:
             if not binance_candles or not tardis_candles:
-                return ValidationResult(
-                    test_name=f"volume_consistency_{timeframe}",
-                    status=ValidationStatus.WARNING,
-                    message="Insufficient data for volume consistency validation",
-                    details={"timeframe": timeframe}
-                )
+                return {
+                    'status': 'WARNING',
+                    'message': 'Insufficient data for volume consistency validation',
+                    'timeframe': timeframe
+                }
             
             # Align candles by timestamp
             aligned_candles = self._align_candles_by_timestamp(binance_candles, tardis_candles)
             
             if not aligned_candles:
-                return ValidationResult(
-                    test_name=f"volume_consistency_{timeframe}",
-                    status=ValidationStatus.FAIL,
-                    message="No aligned candles for volume consistency validation",
-                    details={"timeframe": timeframe}
-                )
+                return {
+                    'status': 'FAIL',
+                    'message': 'No aligned candles for volume consistency validation',
+                    'timeframe': timeframe
+                }
             
             # Check volume consistency
             volume_issues = []
@@ -405,31 +464,28 @@ class ThreeRulesValidator:
             
             # Determine result
             if not volume_issues:
-                status = ValidationStatus.PASS
-                message = f"Volume consistency validated for {timeframe}"
+                status = 'PASS'
+                message = f'Volume consistency validated for {timeframe}'
             else:
-                status = ValidationStatus.FAIL
-                message = f"Volume consistency issues found for {timeframe}"
+                status = 'FAIL'
+                message = f'Volume consistency issues found for {timeframe}'
             
-            return ValidationResult(
-                test_name=f"volume_consistency_{timeframe}",
-                status=status,
-                message=message,
-                details={
-                    'timeframe': timeframe,
-                    'aligned_candles': len(aligned_candles),
-                    'volume_issues': volume_issues,
-                    'tolerance_percent': self.volume_tolerance_percent
-                }
-            )
+            return {
+                'status': status,
+                'message': message,
+                'timeframe': timeframe,
+                'aligned_candles': len(aligned_candles),
+                'volume_issues': volume_issues,
+                'tolerance_percent': self.volume_tolerance_percent
+            }
             
         except Exception as e:
-            return ValidationResult(
-                test_name=f"volume_consistency_{timeframe}",
-                status=ValidationStatus.FAIL,
-                message=f"Volume consistency validation failed: {str(e)}",
-                details={'timeframe': timeframe, 'error': str(e)}
-            )
+            return {
+                'status': 'FAIL',
+                'message': f'Volume consistency validation failed: {str(e)}',
+                'timeframe': timeframe,
+                'error': str(e)
+            }
     
     async def _validate_aggregation_consistency(
         self,
@@ -438,10 +494,8 @@ class ThreeRulesValidator:
         aggregated_timeframe: str,
         start_date: datetime,
         end_date: datetime
-    ) -> ValidationResult:
-        """
-        Validate aggregation consistency between timeframes.
-        """
+    ) -> Dict[str, Any]:
+        """Validate aggregation consistency between timeframes"""
         try:
             # Get base timeframe data
             base_candles = await self.cross_source_validator._get_binance_candles(
@@ -453,12 +507,12 @@ class ThreeRulesValidator:
             )
             
             if not base_candles:
-                return ValidationResult(
-                    test_name=f"aggregation_consistency_{base_timeframe}_to_{aggregated_timeframe}",
-                    status=ValidationStatus.FAIL,
-                    message=f"No base timeframe data for aggregation validation",
-                    details={"base_timeframe": base_timeframe, "aggregated_timeframe": aggregated_timeframe}
-                )
+                return {
+                    'status': 'FAIL',
+                    'message': f'No base timeframe data for aggregation validation',
+                    'base_timeframe': base_timeframe,
+                    'aggregated_timeframe': aggregated_timeframe
+                }
             
             # Aggregate base candles to target timeframe
             aggregated_candles = self._aggregate_candles(base_candles, aggregated_timeframe)
@@ -473,44 +527,42 @@ class ThreeRulesValidator:
             )
             
             if not direct_candles:
-                return ValidationResult(
-                    test_name=f"aggregation_consistency_{base_timeframe}_to_{aggregated_timeframe}",
-                    status=ValidationStatus.FAIL,
-                    message=f"No direct aggregated timeframe data",
-                    details={"base_timeframe": base_timeframe, "aggregated_timeframe": aggregated_timeframe}
-                )
+                return {
+                    'status': 'FAIL',
+                    'message': f'No direct aggregated timeframe data',
+                    'base_timeframe': base_timeframe,
+                    'aggregated_timeframe': aggregated_timeframe
+                }
             
             # Compare aggregated vs direct
             alignment_issues = self._compare_aggregated_candles(aggregated_candles, direct_candles)
             
             if not alignment_issues:
-                status = ValidationStatus.PASS
-                message = f"Aggregation consistency validated from {base_timeframe} to {aggregated_timeframe}"
+                status = 'PASS'
+                message = f'Aggregation consistency validated from {base_timeframe} to {aggregated_timeframe}'
             else:
-                status = ValidationStatus.FAIL
-                message = f"Aggregation consistency issues found from {base_timeframe} to {aggregated_timeframe}"
+                status = 'FAIL'
+                message = f'Aggregation consistency issues found from {base_timeframe} to {aggregated_timeframe}'
             
-            return ValidationResult(
-                test_name=f"aggregation_consistency_{base_timeframe}_to_{aggregated_timeframe}",
-                status=status,
-                message=message,
-                details={
-                    'base_timeframe': base_timeframe,
-                    'aggregated_timeframe': aggregated_timeframe,
-                    'base_candles': len(base_candles),
-                    'aggregated_candles': len(aggregated_candles),
-                    'direct_candles': len(direct_candles),
-                    'alignment_issues': alignment_issues
-                }
-            )
+            return {
+                'status': status,
+                'message': message,
+                'base_timeframe': base_timeframe,
+                'aggregated_timeframe': aggregated_timeframe,
+                'base_candles': len(base_candles),
+                'aggregated_candles': len(aggregated_candles),
+                'direct_candles': len(direct_candles),
+                'alignment_issues': alignment_issues
+            }
             
         except Exception as e:
-            return ValidationResult(
-                test_name=f"aggregation_consistency_{base_timeframe}_to_{aggregated_timeframe}",
-                status=ValidationStatus.FAIL,
-                message=f"Aggregation consistency validation failed: {str(e)}",
-                details={'base_timeframe': base_timeframe, 'aggregated_timeframe': aggregated_timeframe, 'error': str(e)}
-            )
+            return {
+                'status': 'FAIL',
+                'message': f'Aggregation consistency validation failed: {str(e)}',
+                'base_timeframe': base_timeframe,
+                'aggregated_timeframe': aggregated_timeframe,
+                'error': str(e)
+            }
     
     def _align_candles_by_timestamp(self, binance_candles: List, tardis_candles: List) -> List[Dict[str, Any]]:
         """Align candles by timestamp for comparison"""
@@ -635,39 +687,62 @@ class ThreeRulesValidator:
 
 
 async def main():
-    """Main function to run Three Rules Validation"""
+    """Main function to run Real Three Rules Validation"""
     
-    print("🔍 Three Rules Validation System")
+    parser = argparse.ArgumentParser(description='Real Three Rules Validation System')
+    parser.add_argument('--symbol', default='BTC-USDT', help='Trading symbol to validate (default: BTC-USDT)')
+    parser.add_argument('--timeframes', default='1m,5m,15m,1h,4h,1d', help='Comma-separated timeframes (default: 1m,5m,15m,1h,4h,1d)')
+    parser.add_argument('--hours', type=int, default=24, help='Hours of data to validate (default: 24)')
+    parser.add_argument('--dry-run', action='store_true', help='Check configuration only')
+    
+    args = parser.parse_args()
+    
+    print("🔍 Real Three Rules Validation System")
     print("=" * 50)
-    print("This implements the comprehensive validation from market-data-handler:")
-    print("1. Timestamp Alignment Rule")
-    print("2. OHLC Preservation Rule")
-    print("3. Volume Consistency Rule")
+    print("This uses actual Tardis API, Google Cloud Storage, and Binance data")
     print("=" * 50)
+    
+    # Check environment
+    required_vars = ['TARDIS_API_KEY', 'GCP_PROJECT_ID', 'GCS_BUCKET', 'GCP_CREDENTIALS_PATH']
+    missing_vars = [var for var in required_vars if not os.getenv(var) or 'your_' in os.getenv(var, '')]
+    
+    if missing_vars:
+        print(f"❌ Missing environment variables: {missing_vars}")
+        print("   Please set your actual API keys and configuration")
+        print("\nRequired environment variables:")
+        print("   export TARDIS_API_KEY='TD.your_actual_tardis_key'")
+        print("   export GCS_BUCKET='your_actual_bucket_name'")
+        print("   export BINANCE_API_KEY='your_actual_binance_key'")
+        print("   export BINANCE_SECRET_KEY='your_actual_binance_secret'")
+        return 1
+    
+    if args.dry_run:
+        print("✅ Environment variables are set correctly")
+        print("   Run without --dry-run to perform actual validation")
+        return 0
     
     try:
-        # Load configuration
-        config = get_config()
-        
-        # Initialize services
-        data_client = DataClient(config.gcp.bucket, config)
-        tardis_connector = TardisConnector()
-        
         # Initialize validator
-        validator = ThreeRulesValidator(data_client, tardis_connector)
+        validator = RealThreeRulesValidator()
         
-        # Test parameters
-        symbol = "BTC-USDT"
-        timeframes = ["1m", "5m", "15m", "1h", "4h", "1d"]
+        if not await validator.initialize():
+            print("❌ Failed to initialize services")
+            return 1
+        
+        # Parse timeframes
+        timeframes = [tf.strip() for tf in args.timeframes.split(',')]
+        
+        # Calculate date range
         end_time = datetime.now(timezone.utc)
-        start_time = end_time - timedelta(days=1)  # Last 24 hours
+        start_time = end_time - timedelta(hours=args.hours)
         
-        print(f"📊 Validating {symbol} across timeframes: {timeframes}")
+        print(f"📊 Validating {args.symbol} across timeframes: {timeframes}")
         print(f"📅 Date range: {start_time} to {end_time}")
+        print()
         
         # Run validation
-        report = await validator.validate_three_rules(
-            symbol=symbol,
+        results = await validator.validate_three_rules(
+            symbol=args.symbol,
             timeframes=timeframes,
             start_date=start_time,
             end_date=end_time,
@@ -678,21 +753,46 @@ async def main():
         print("\n📋 Detailed Results:")
         print("-" * 50)
         
-        for result in report.results:
-            status_emoji = "✅" if result.status == ValidationStatus.PASS else "❌" if result.status == ValidationStatus.FAIL else "⚠️"
-            print(f"{status_emoji} {result.test_name}: {result.status.value}")
-            print(f"   {result.message}")
-            if result.details and len(str(result.details)) < 200:
-                print(f"   Details: {result.details}")
+        # Timestamp Rule Results
+        print("\n1️⃣ Timestamp Alignment Rule:")
+        for timeframe, result in results['timestamp_rule'].items():
+            status_emoji = "✅" if result['status'] == 'PASS' else "❌" if result['status'] == 'FAIL' else "⚠️"
+            print(f"   {status_emoji} {timeframe}: {result['status']} - {result['message']}")
+            if 'binance_candles' in result:
+                print(f"      Binance: {result['binance_candles']} candles, Tardis: {result['tardis_candles']} candles")
         
+        # OHLC Rule Results
+        print("\n2️⃣ OHLC Preservation Rule:")
+        for timeframe, result in results['ohlc_rule'].items():
+            status_emoji = "✅" if result['status'] == 'PASS' else "❌" if result['status'] == 'FAIL' else "⚠️"
+            print(f"   {status_emoji} {timeframe}: {result['status']} - {result['message']}")
+            if 'aligned_candles' in result:
+                print(f"      Aligned candles: {result['aligned_candles']}")
+        
+        # Volume Rule Results
+        print("\n3️⃣ Volume Consistency Rule:")
+        for timeframe, result in results['volume_rule'].items():
+            status_emoji = "✅" if result['status'] == 'PASS' else "❌" if result['status'] == 'FAIL' else "⚠️"
+            print(f"   {status_emoji} {timeframe}: {result['status']} - {result['message']}")
+            if 'aligned_candles' in result:
+                print(f"      Aligned candles: {result['aligned_candles']}")
+        
+        # Aggregation Rule Results
+        if results['aggregation_rule']:
+            print("\n4️⃣ Aggregation Consistency Rule:")
+            for rule, result in results['aggregation_rule'].items():
+                status_emoji = "✅" if result['status'] == 'PASS' else "❌" if result['status'] == 'FAIL' else "⚠️"
+                print(f"   {status_emoji} {rule}: {result['status']} - {result['message']}")
+        
+        # Summary
         print(f"\n📊 Summary:")
-        print(f"   Total Tests: {report.total_tests}")
-        print(f"   Passed: {report.passed_tests}")
-        print(f"   Failed: {report.failed_tests}")
-        print(f"   Warnings: {report.warning_tests}")
-        print(f"   Success Rate: {report.get_success_rate():.1f}%")
+        print(f"   Total Tests: {results['summary']['total_tests']}")
+        print(f"   Passed: {results['summary']['passed']}")
+        print(f"   Failed: {results['summary']['failed']}")
+        print(f"   Warnings: {results['summary']['warnings']}")
+        print(f"   Success Rate: {results['summary']['success_rate']:.1f}%")
         
-        if report.get_success_rate() >= 80:
+        if results['summary']['success_rate'] >= 80:
             print("\n🎉 Three Rules Validation completed successfully!")
             return 0
         else:
