@@ -386,16 +386,49 @@ class CrossSourceValidator:
         end_date: datetime,
         max_candles: int
     ) -> List[OHLCV]:
-        """Get candles from Tardis data"""
+        """Get candles from Tardis-derived data stored in GCS"""
         try:
-            # This would integrate with your existing Tardis data loading
-            # For now, return empty list as placeholder
-            logger.info(f"Tardis candle retrieval not yet implemented for {symbol} {timeframe}")
-            return []
+            # Convert symbol to Tardis format if needed
+            tardis_symbol = self._convert_to_tardis_symbol(symbol)
+            
+            # Query GCS for processed candle data
+            candles = await self.data_client.get_candles(
+                instrument_id=tardis_symbol,
+                timeframe=timeframe,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Convert to OHLCV format
+            ohlcv_candles = []
+            for candle in candles[:max_candles]:
+                ohlcv_candle = OHLCV(
+                    timestamp=candle['timestamp'],
+                    open=float(candle['open']),
+                    high=float(candle['high']),
+                    low=float(candle['low']),
+                    close=float(candle['close']),
+                    volume=float(candle['volume']),
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    source='tardis'
+                )
+                ohlcv_candles.append(ohlcv_candle)
+            
+            logger.info(f"Retrieved {len(ohlcv_candles)} Tardis candles for {symbol} {timeframe}")
+            return ohlcv_candles
             
         except Exception as e:
             logger.error(f"Failed to get Tardis candles: {e}")
             return []
+    
+    def _convert_to_tardis_symbol(self, symbol: str) -> str:
+        """Convert Binance symbol to Tardis instrument format"""
+        # Convert BTC-USDT to BINANCE:SPOT_PAIR:BTC-USDT format
+        if '-' in symbol:
+            base, quote = symbol.split('-', 1)
+            return f"BINANCE:SPOT_PAIR:{base}-{quote}"
+        return symbol
     
     def _align_candles(self, binance_candles: List[OHLCV], tardis_candles: List[OHLCV]) -> List[Dict[str, Any]]:
         """Align candles by timestamp for comparison"""
