@@ -1,6 +1,6 @@
 # Market Tick Data Handler
 
-A high-performance system for downloading, processing, and storing cryptocurrency tick data from Tardis.dev into Google Cloud Storage.
+A high-performance system for downloading, processing, and storing cryptocurrency tick data from Tardis.dev into Google Cloud Storage, with comprehensive validation framework and real-time streaming integration.
 
 ## 🚀 Quick Start
 
@@ -447,6 +447,56 @@ blob = bucket.blob('instrument_availability/by_date/day-2023-05-23/instruments.p
 blob.download_to_filename('instruments.parquet')
 instruments = pd.read_parquet('instruments.parquet')
 ```
+
+## 🔍 Validation Framework
+
+### Comprehensive Data Validation
+
+The system includes a robust validation framework for ensuring data quality and consistency:
+
+- **Cross-Source Validation**: Compare Binance vs Tardis data
+- **Timestamp Stability**: Validate timestamp consistency and ordering
+- **Aggregation Consistency**: Verify candle aggregation correctness
+- **Real-time Streaming Validation**: Validate streaming data in real-time
+
+### Quick Validation Test
+
+```bash
+# Run all validation tests
+python run_validation_tests.py --test-type all
+
+# Run specific validation types
+python run_validation_tests.py --test-type cross-source --symbol BTC-USDT --timeframe 1m
+python run_validation_tests.py --test-type timestamp --data-file data.parquet
+python run_validation_tests.py --test-type aggregation --base-file 1m.parquet --agg-file 5m.parquet
+```
+
+### Streaming Integration
+
+Real-time validation integration with the unified streaming architecture:
+
+```python
+from src.validation.streaming_integration import StreamingServiceValidator
+
+# Create streaming validator
+validator = StreamingServiceValidator(
+    cross_source_validator=cross_source_validator,
+    timestamp_validator=timestamp_validator,
+    aggregation_validator=aggregation_validator
+)
+
+# Start validator
+await validator.start()
+
+# Validate streaming candle
+result = await validator.validate_candle(candle, "BTC-USDT", "1m")
+```
+
+### Validation Documentation
+
+- [Validation Framework Guide](docs/VALIDATION_FRAMEWORK_README.md)
+- [Streaming Integration Guide](docs/STREAMING_VALIDATION_INTEGRATION.md)
+- [Testing Analysis](docs/TESTING_ANALYSIS.md)
 
 ## 🧪 Testing
 

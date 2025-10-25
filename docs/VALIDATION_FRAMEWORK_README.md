@@ -37,13 +37,16 @@ src/validation/
 ├── validation_results.py       # Result structures and enums
 ├── cross_source_validator.py   # Binance vs Tardis validation
 ├── timestamp_validator.py      # Timestamp stability validation
-└── aggregation_validator.py    # Aggregation consistency validation
+├── aggregation_validator.py    # Aggregation consistency validation
+├── streaming_validator.py      # Real-time streaming validation
+└── streaming_integration.py    # Streaming service integration
 
 tests/
 ├── __init__.py
 ├── test_cross_source_validation.py
 ├── test_timestamp_validation.py
-└── test_aggregation_validation.py
+├── test_aggregation_validation.py
+└── test_streaming_validation.py
 
 examples/
 ├── compare_binance_vs_tardis.py
@@ -53,7 +56,36 @@ examples/
 
 ## 🔧 Core Components
 
-### 1. Cross-Source Validator
+### 1. Streaming Validation Integration
+
+**NEW**: Real-time validation integration with the unified streaming architecture.
+
+**Key Features:**
+- Real-time validation of streaming candles
+- Integration with Node.js ingestion layer
+- Async validation processing
+- Performance monitoring and error handling
+- Callback system for validation results
+
+**Usage:**
+```python
+from src.validation.streaming_integration import StreamingServiceValidator
+
+# Create streaming validator
+validator = StreamingServiceValidator(
+    cross_source_validator=cross_source_validator,
+    timestamp_validator=timestamp_validator,
+    aggregation_validator=aggregation_validator
+)
+
+# Start validator
+await validator.start()
+
+# Validate streaming candle
+result = await validator.validate_candle(candle, "BTC-USDT", "1m")
+```
+
+### 2. Cross-Source Validator
 
 Validates data consistency between Binance (via CCXT) and Tardis-derived candles.
 
@@ -101,7 +133,7 @@ result = validator.validate_timestamp_stability(
 )
 ```
 
-### 3. Aggregation Validator
+### 4. Aggregation Validator
 
 Validates the correctness of candle aggregation across timeframes.
 
